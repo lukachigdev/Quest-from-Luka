@@ -100,6 +100,10 @@ body{background:#1a6fbb;font-family:'Cinzel',serif;overflow:hidden;width:100vw;h
 .inv-empty{color:#5a4a3a;font-size:10px;text-align:center;padding:28px;letter-spacing:2px}
 #panel-close{width:100%;padding:10px;text-align:center;font-family:'Cinzel',serif;font-size:10px;letter-spacing:3px;color:#9a7a4a;cursor:pointer;border:none;background:none;border-top:1px solid #7a4a0a33;display:block}
 #panel-close:hover{color:#f5c842}
+/* ── Minimap ── */
+#minimap{position:absolute;bottom:168px;left:16px;width:130px;height:130px;border-radius:50%;border:2px solid #7a4a0a99;background:#0d1a0d;overflow:hidden;pointer-events:none;box-shadow:0 0 12px #000a,0 0 4px #f5c84233}
+#minimap canvas{width:130px;height:130px;border-radius:50%}
+#minimap-label{position:absolute;bottom:162px;left:82px;color:#f5c84266;font-size:7px;letter-spacing:1px;pointer-events:none}
 </style>
 </head>
 <body>
@@ -124,6 +128,8 @@ body{background:#1a6fbb;font-family:'Cinzel',serif;overflow:hidden;width:100vw;h
     <div class="bar-outer spc-bg"><div id="spc-fill"></div></div>
   </div>
   <div id="shield-ind">🛡 BLOCKING</div>
+  <div id="minimap"><canvas id="minimapCanvas" width="130" height="130"></canvas></div>
+  <div id="minimap-label">MAP</div>
   <div id="gear">
     <div class="gear-slot" id="gear-weapon"><span>⚔</span><div class="gear-name">NONE</div></div>
     <div class="gear-slot" id="gear-armor"><span>🛡</span><div class="gear-name">NONE</div></div>
@@ -169,154 +175,257 @@ body{background:#1a6fbb;font-family:'Cinzel',serif;overflow:hidden;width:100vw;h
 // ═══════════════════════════════════════════════════════════
 //  IRON CROWN — Audio | Grass | HP Numbers | Shield | Skill
 // ═══════════════════════════════════════════════════════════
- 
+
 // ── Web Audio Engine ──────────────────────────────────────
 var AC=null, musicGain, sfxGain, masterGain;
 var isMuted=false;
- 
+
 // Classical D-minor scale — natural, melancholic medieval
 // D E F G A Bb C D (natural minor) in multiple octaves
-var SCALE_FREQS=[146.83,164.81,174.61,196.00,220.00,233.08,261.63,
-                 293.66,329.63,349.23,392.00,440.00,466.16,523.25,587.33];
-// Melodic phrases — indices into SCALE_FREQS, Bach/folk-style
-var PHRASES=[
-  [7,9,10,9,7,5,4,5,7,5,4,2,4,5,7,7],       // descending lyrical
-  [4,5,7,9,10,9,7,5,7,9,10,12,10,9,7,5],     // ascending hopeful
-  [7,7,9,7,5,4,5,4,2,4,5,7,9,10,9,7],        // ornamental run
-  [10,9,7,5,4,5,7,9,7,5,4,2,4,5,7,4]         // lute-style arpeggio
+// ── Classical Orchestral Music Engine ─────────────────────
+// D minor — Dm, C, Bb, A progression (medieval/classical feel)
+var CHORD_PROG=[
+  [146.83,174.61,220.00,293.66],   // Dm: D3 F3 A3 D4
+  [130.81,164.81,196.00,261.63],   // C:  C3 E3 G3 C4
+  [116.54,146.83,174.61,233.08],   // Bb: Bb2 D3 F3 Bb3
+  [110.00,146.83,164.81,220.00]    // A:  A2 D3 E3 A3
 ];
-var melPhrase=0,melNote=0,melTimer=0,melSpeed=0.42;
-var luteTimer=0, lutePattern=[[0,4,7],[0,3,7],[0,5,9],[2,5,9]],luteChord=0;
-var musicNodes=[]; // track oscillators to stop on mute
- 
+// Violin melody — D minor scale, graceful classical phrases
+var MEL_NOTES=[293.66,329.63,349.23,392.00,440.00,466.16,523.25,587.33,659.25,698.46,783.99];
+var MEL_PHRASES=[
+  [4,4,5,6,5,4,2,0,2,4,5,4,3,2,3,4],   // lyrical descending
+  [0,2,4,5,6,5,4,2,4,5,6,8,6,5,4,2],   // ascending hopeful
+  [6,5,4,2,0,2,4,5,4,5,6,5,4,3,2,0],   // flowing ornamental
+  [4,6,5,4,2,4,5,6,8,6,5,4,5,4,2,0]    // energetic sweep
+];
+var melPhrase=0,melNote=0,melTimer=0,melSpeed=0.32;
+var harpTimer=0,harpChord=0;
+var hornTimer=0,hornBeat=0;
+var timpTimer=0,timpBeat=0;
+var chordIdx=0,chordTimer=0;
+
 function toggleMute(){
   isMuted=!isMuted;
   document.getElementById('mute-btn').textContent=isMuted?'🔇':'🔊';
-  if(AC&&masterGain) masterGain.gain.linearRampToValueAtTime(isMuted?0:1,AC.currentTime+0.3);
+  if(AC&&masterGain) masterGain.gain.linearRampToValueAtTime(isMuted?0:1,AC.currentTime+0.5);
 }
- 
+
 function initAudio(){
   try{
     if(!AC){
       AC=new(window.AudioContext||window.webkitAudioContext)();
       masterGain=AC.createGain(); masterGain.gain.value=1; masterGain.connect(AC.destination);
-      musicGain=AC.createGain(); musicGain.gain.value=0.18; musicGain.connect(masterGain);
-      sfxGain=AC.createGain();   sfxGain.gain.value=0.55;   sfxGain.connect(masterGain);
+      musicGain=AC.createGain(); musicGain.gain.value=0.22; musicGain.connect(masterGain);
+      sfxGain=AC.createGain(); sfxGain.gain.value=0.55; sfxGain.connect(masterGain);
     }
     if(AC.state==='suspended') AC.resume();
-    startCelloDrone();
-    startStringPad();
+    startStringSection();
+    startChoirPad();
+    startOrganPedal();
   }catch(e){console.warn('Audio init failed:',e);}
 }
- 
-// Warm cello-like drone on D and A
-function startCelloDrone(){
-  var freqs=[73.42,110.00,146.83]; // D2, A2, D3
-  for(var i=0;i<freqs.length;i++){(function(f,vol){
-    var o=AC.createOscillator(), o2=AC.createOscillator();
-    var g=AC.createGain(), filt=AC.createBiquadFilter();
+
+// Rich string section — multiple bowed voices with vibrato
+function startStringSection(){
+  // Bass strings: cello/contrabass layer
+  var bassFreqs=[36.71,55.00,73.42]; // D1 A1 D2
+  for(var i=0;i<bassFreqs.length;i++){(function(f,vol){
+    var o=AC.createOscillator(),o2=AC.createOscillator(),g=AC.createGain(),lp=AC.createBiquadFilter();
     o.type='sawtooth'; o.frequency.value=f;
-    o2.type='sawtooth'; o2.frequency.value=f*1.005; // slight detune for warmth
-    filt.type='lowpass'; filt.frequency.value=f*6; filt.Q.value=0.7;
+    o2.type='sawtooth'; o2.frequency.value=f*1.006;
+    lp.type='lowpass'; lp.frequency.value=f*8; lp.Q.value=0.5;
     g.gain.value=vol;
-    o.connect(filt); o2.connect(filt); filt.connect(g); g.connect(musicGain);
-    o.start(); o2.start();
-  })(freqs[i],[0.055,0.035,0.045][i]);}
-}
- 
-// Shimmering string pad — viola/violin sustained harmony
-function startStringPad(){
-  var chordFreqs=[220.00,261.63,329.63,392.00]; // A3 C4 E4 G4 — Am chord
-  for(var i=0;i<chordFreqs.length;i++){(function(f,idx){
-    var o=AC.createOscillator(), vibLfo=AC.createOscillator(), vibG=AC.createGain();
-    var g=AC.createGain(), filt=AC.createBiquadFilter();
+    // Slow bow swell
+    var sw=AC.createOscillator(),swg=AC.createGain();
+    sw.type='sine'; sw.frequency.value=0.07; swg.gain.value=vol*0.3;
+    sw.connect(swg); swg.connect(g.gain);
+    o.connect(lp); o2.connect(lp); lp.connect(g); g.connect(musicGain);
+    o.start(); o2.start(); sw.start();
+  })(bassFreqs[i],[0.06,0.04,0.05][i]);}
+
+  // Mid strings: viola layer — Am chord shimmer
+  var midFreqs=[146.83,174.61,220.00,261.63,293.66];
+  for(var i=0;i<midFreqs.length;i++){(function(f,idx){
+    var o=AC.createOscillator(),vib=AC.createOscillator(),vg=AC.createGain();
+    var g=AC.createGain(),bp=AC.createBiquadFilter();
     o.type='sawtooth'; o.frequency.value=f;
-    vibLfo.type='sine'; vibLfo.frequency.value=4.8+idx*0.3;
-    vibG.gain.value=f*0.008; // subtle vibrato
-    filt.type='bandpass'; filt.frequency.value=f*3; filt.Q.value=1.8;
-    g.gain.value=0.022;
-    // Slow swell using LFO on gain
-    var swellLfo=AC.createOscillator(), swellG=AC.createGain();
-    swellLfo.type='sine'; swellLfo.frequency.value=0.08+idx*0.015;
-    swellG.gain.value=0.015;
-    vibLfo.connect(vibG); vibG.connect(o.frequency);
-    swellLfo.connect(swellG); swellG.connect(g.gain);
-    o.connect(filt); filt.connect(g); g.connect(musicGain);
-    o.start(); vibLfo.start(); swellLfo.start();
-  })(chordFreqs[i],i);}
+    vib.type='sine'; vib.frequency.value=5.2+idx*0.18; vg.gain.value=f*0.006;
+    bp.type='bandpass'; bp.frequency.value=f*2.8; bp.Q.value=2.2;
+    g.gain.value=0.018;
+    var sw=AC.createOscillator(),swg=AC.createGain();
+    sw.type='sine'; sw.frequency.value=0.09+idx*0.013; swg.gain.value=0.012;
+    sw.connect(swg); swg.connect(g.gain);
+    vib.connect(vg); vg.connect(o.frequency);
+    o.connect(bp); bp.connect(g); g.connect(musicGain);
+    o.start(); vib.start(); sw.start();
+  })(midFreqs[i],i);}
 }
- 
+
+// Choir pad — vowel-like AAAH using formant filters
+function startChoirPad(){
+  var voices=[146.83,220.00,329.63,440.00];
+  for(var i=0;i<voices.length;i++){(function(f,idx){
+    var o=AC.createOscillator(),vib=AC.createOscillator(),vg=AC.createGain();
+    var f1=AC.createBiquadFilter(),f2=AC.createBiquadFilter(),g=AC.createGain();
+    o.type='sawtooth'; o.frequency.value=f;
+    vib.type='sine'; vib.frequency.value=4.5+idx*0.2; vg.gain.value=f*0.005;
+    // Formant filters for vowel timbre
+    f1.type='bandpass'; f1.frequency.value=800; f1.Q.value=5;
+    f2.type='bandpass'; f2.frequency.value=1200; f2.Q.value=8;
+    g.gain.value=0.014;
+    var sw=AC.createOscillator(),swg=AC.createGain();
+    sw.type='sine'; sw.frequency.value=0.06+idx*0.02; swg.gain.value=0.010;
+    sw.connect(swg); swg.connect(g.gain);
+    vib.connect(vg); vg.connect(o.frequency);
+    o.connect(f1); o.connect(f2); f1.connect(g); f2.connect(g); g.connect(musicGain);
+    o.start(); vib.start(); sw.start();
+  })(voices[i],i);}
+}
+
+// Organ/pipe pedal — cathedral depth
+function startOrganPedal(){
+  var pedals=[36.71,55.00,73.42];
+  for(var i=0;i<pedals.length;i++){(function(f,vol){
+    var o=AC.createOscillator(),o2=AC.createOscillator(),o3=AC.createOscillator();
+    var g=AC.createGain(),lp=AC.createBiquadFilter();
+    o.type='sine'; o.frequency.value=f;
+    o2.type='sine'; o2.frequency.value=f*2;   // 8va harmonic
+    o3.type='sine'; o3.frequency.value=f*3;   // 12th harmonic
+    lp.type='lowpass'; lp.frequency.value=400;
+    g.gain.value=vol;
+    o.connect(lp); o2.connect(lp); o3.connect(lp); lp.connect(g); g.connect(musicGain);
+    o.start(); o2.start(); o3.start();
+  })(pedals[i],[0.04,0.028,0.022][i]);}
+}
+
 function tickMelody(dt){
   if(!AC||!gameRunning)return;
-  // Melody — bowed strings / recorder tone
+  var now=AC.currentTime;
+
+  // Violin melody — smooth lyrical
   melTimer-=dt;
   if(melTimer<=0){
-    melTimer=melSpeed*(0.9+Math.random()*0.3);
-    var phrase=PHRASES[melPhrase%PHRASES.length];
+    melTimer=melSpeed*(0.85+Math.random()*0.3);
+    var phrase=MEL_PHRASES[melPhrase%MEL_PHRASES.length];
     var fi=phrase[melNote%phrase.length];
-    var freq=SCALE_FREQS[Math.min(fi,SCALE_FREQS.length-1)];
-    playStringNote(freq, melTimer*0.85);
+    playViolinNote(MEL_NOTES[Math.min(fi,MEL_NOTES.length-1)], melTimer*0.9);
     melNote++;
-    if(melNote%phrase.length===0){
-      melPhrase++;
-      melSpeed=0.35+Math.random()*0.12; // slight tempo variation
-    }
+    if(melNote%phrase.length===0){ melPhrase++; melSpeed=0.28+Math.random()*0.10; }
   }
-  // Lute pluck arpeggio — every ~1.8s
-  luteTimer-=dt;
-  if(luteTimer<=0){
-    luteTimer=1.6+Math.random()*0.8;
-    var chord=LUTEBASE[luteChord%LUTEBASE.length];
-    playLutePluck(chord[0],0.0);
-    playLutePluck(chord[1],0.08);
-    playLutePluck(chord[2],0.16);
-    luteChord++;
+
+  // Harp arpeggio — every ~1.4s, rolls through chord
+  harpTimer-=dt;
+  if(harpTimer<=0){
+    harpTimer=1.3+Math.random()*0.7;
+    var chord=CHORD_PROG[harpChord%CHORD_PROG.length];
+    for(var i=0;i<chord.length;i++) playHarpNote(chord[i], i*0.06);
+    harpChord++;
+    // Change underlying chord index for organ/strings feel
+    chordIdx=(chordIdx+1)%CHORD_PROG.length;
+  }
+
+  // French horn — every ~3.2s, sustained note
+  hornTimer-=dt;
+  if(hornTimer<=0){
+    hornTimer=3.0+Math.random()*1.5;
+    var hornFreqs=[146.83,130.81,116.54,110.00];
+    playHornNote(hornFreqs[hornBeat%hornFreqs.length], 1.4+Math.random()*0.6);
+    hornBeat++;
+  }
+
+  // Timpani — every ~2.4s, low dramatic hit
+  timpTimer-=dt;
+  if(timpTimer<=0){
+    timpTimer=2.2+Math.random()*1.2;
+    var timpFreqs=[55.00,49.00,58.27,55.00];
+    playTimpani(timpFreqs[timpBeat%timpFreqs.length]);
+    timpBeat++;
   }
 }
- 
-var LUTEBASE=[[146.83,220.00,293.66],[130.81,196.00,261.63],
-              [146.83,174.61,220.00],[164.81,220.00,329.63]];
- 
-// Bowed string note — rich, warm, naturally decaying
-function playStringNote(freq,dur){
+
+// Violin — bright bowed note with vibrato and natural envelope
+function playViolinNote(freq,dur){
   if(!AC)return;
   var t=AC.currentTime;
   var o=AC.createOscillator(),o2=AC.createOscillator();
   var vib=AC.createOscillator(),vg=AC.createGain();
-  var filt=AC.createBiquadFilter(),g=AC.createGain();
+  var hp=AC.createBiquadFilter(),g=AC.createGain();
   o.type='sawtooth'; o.frequency.value=freq;
-  o2.type='sawtooth'; o2.frequency.value=freq*0.998;
-  vib.type='sine'; vib.frequency.value=5.5; vg.gain.value=freq*0.007;
-  filt.type='lowpass'; filt.frequency.value=freq*5; filt.Q.value=0.9;
-  // Bow attack: slow fade in, natural decay
+  o2.type='sawtooth'; o2.frequency.value=freq*1.003;
+  vib.type='sine'; vib.frequency.value=6.2; vg.gain.value=freq*0.009;
+  hp.type='highpass'; hp.frequency.value=200;
+  // Smooth bow envelope: attack, sustain, release
   g.gain.setValueAtTime(0,t);
-  g.gain.linearRampToValueAtTime(0.11,t+0.06);
-  g.gain.setValueAtTime(0.09,t+dur*0.5);
+  g.gain.linearRampToValueAtTime(0.13,t+0.04);
+  g.gain.linearRampToValueAtTime(0.10,t+dur*0.6);
   g.gain.linearRampToValueAtTime(0,t+dur);
-  vib.connect(vg); vg.connect(o.frequency);
-  o.connect(filt); o2.connect(filt); filt.connect(g); g.connect(musicGain);
+  vib.connect(vg); vg.connect(o.frequency); vg.connect(o2.frequency);
+  o.connect(hp); o2.connect(hp); hp.connect(g); g.connect(musicGain);
   o.start(t); o2.start(t); vib.start(t);
   o.stop(t+dur); o2.stop(t+dur); vib.stop(t+dur);
 }
- 
-// Lute pluck — short, bright, natural decay
-function playLutePluck(freq,delay){
+
+// Harp — plucked resonant decay with Karplus-Strong-like character
+function playHarpNote(freq,delay){
   if(!AC)return;
   var t=AC.currentTime+delay;
+  // Noise burst into resonator for pluck character
+  var bufLen=Math.floor(AC.sampleRate*0.025);
+  var buf=AC.createBuffer(1,bufLen,AC.sampleRate);
+  var d=buf.getChannelData(0);
+  for(var i=0;i<bufLen;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/bufLen,0.3);
+  var src=AC.createBufferSource();
+  var o=AC.createOscillator(),o2=AC.createOscillator();
+  var bp=AC.createBiquadFilter(),g=AC.createGain();
+  o.type='sine'; o.frequency.value=freq;
+  o2.type='sine'; o2.frequency.value=freq*2.001;
+  bp.type='bandpass'; bp.frequency.value=freq*1.5; bp.Q.value=3;
+  g.gain.setValueAtTime(0.11,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+1.6);
+  src.buffer=buf; src.connect(bp);
+  o.connect(bp); o2.connect(bp); bp.connect(g); g.connect(musicGain);
+  src.start(t); o.start(t); o2.start(t); o.stop(t+1.6); o2.stop(t+1.6);
+}
+
+// French horn — warm, breathy, sustained
+function playHornNote(freq,dur){
+  if(!AC)return;
+  var t=AC.currentTime;
+  var o=AC.createOscillator(),o2=AC.createOscillator(),o3=AC.createOscillator();
+  var lp=AC.createBiquadFilter(),g=AC.createGain();
+  o.type='sawtooth'; o.frequency.value=freq;
+  o2.type='sawtooth'; o2.frequency.value=freq*2.01;
+  o3.type='sine'; o3.frequency.value=freq*0.5;  // sub tone
+  lp.type='lowpass'; lp.frequency.value=freq*4; lp.Q.value=0.7;
+  // Horn envelope: slow attack, hold, slow release
+  g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(0.09,t+0.22);
+  g.gain.setValueAtTime(0.07,t+dur*0.7);
+  g.gain.linearRampToValueAtTime(0,t+dur);
+  o.connect(lp); o2.connect(lp); o3.connect(lp); lp.connect(g); g.connect(musicGain);
+  o.start(t); o2.start(t); o3.start(t);
+  o.stop(t+dur); o2.stop(t+dur); o3.stop(t+dur);
+}
+
+// Timpani — low resonant drum hit
+function playTimpani(freq){
+  if(!AC)return;
+  var t=AC.currentTime;
   var buf=AC.createBuffer(1,Math.floor(AC.sampleRate*0.04),AC.sampleRate);
   var d=buf.getChannelData(0);
-  for(var i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*(1-i/d.length);
+  for(var i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,0.4);
   var src=AC.createBufferSource();
-  var o=AC.createOscillator(), g=AC.createGain(), filt=AC.createBiquadFilter();
-  o.type='sine'; o.frequency.value=freq;
-  filt.type='bandpass'; filt.frequency.value=freq*2; filt.Q.value=2;
-  g.gain.setValueAtTime(0.09,t);
-  g.gain.exponentialRampToValueAtTime(0.001,t+0.9);
-  src.buffer=buf; src.connect(filt);
-  o.connect(filt); filt.connect(g); g.connect(musicGain);
-  src.start(t); o.start(t); o.stop(t+0.9);
+  var o=AC.createOscillator(),o2=AC.createOscillator();
+  var lp=AC.createBiquadFilter(),g=AC.createGain();
+  o.type='sine'; o.frequency.setValueAtTime(freq,t); o.frequency.exponentialRampToValueAtTime(freq*0.6,t+0.5);
+  o2.type='sine'; o2.frequency.value=freq*1.5;
+  lp.type='lowpass'; lp.frequency.value=300;
+  g.gain.setValueAtTime(0.18,t); g.gain.exponentialRampToValueAtTime(0.001,t+1.1);
+  src.buffer=buf; src.connect(lp);
+  o.connect(lp); o2.connect(lp); lp.connect(g); g.connect(musicGain);
+  src.start(t); o.start(t); o2.start(t); o.stop(t+1.1); o2.stop(t+1.1);
 }
- 
+
 function playSword(){
   if(!AC)return; var now=AC.currentTime;
   // Whoosh
@@ -332,7 +441,7 @@ function playSword(){
   g2.gain.setValueAtTime(0.28,now); g2.gain.exponentialRampToValueAtTime(0.001,now+0.18);
   o.connect(g2); g2.connect(sfxGain); o.start(now); o.stop(now+0.18);
 }
- 
+
 function playHit(isPlayer){
   if(!AC)return; var now=AC.currentTime;
   var o=AC.createOscillator(),g=AC.createGain();
@@ -347,7 +456,7 @@ function playHit(isPlayer){
   var s=AC.createBufferSource(),g3=AC.createGain();
   g3.gain.value=0.45; s.buffer=buf; s.connect(g3); g3.connect(sfxGain); s.start(now);
 }
- 
+
 function playBlock(){
   if(!AC)return; var now=AC.currentTime;
   var o=AC.createOscillator(),g=AC.createGain();
@@ -359,7 +468,7 @@ function playBlock(){
   g2.gain.setValueAtTime(0.18,now); g2.gain.exponentialRampToValueAtTime(0.001,now+0.1);
   o2.connect(g2); g2.connect(sfxGain); o2.start(now); o2.stop(now+0.1);
 }
- 
+
 function playSpecialSFX(){
   if(!AC)return; var now=AC.currentTime;
   for(var i=0;i<6;i++){
@@ -370,7 +479,7 @@ function playSpecialSFX(){
     o.connect(g); g.connect(sfxGain); o.start(t); o.stop(t+0.24);
   }
 }
- 
+
 function playLevelUp(){
   if(!AC)return; var now=AC.currentTime;
   var fr=[523.25,659.25,783.99,1046.50];
@@ -381,7 +490,7 @@ function playLevelUp(){
     o.connect(g); g.connect(sfxGain); o.start(t); o.stop(t+0.38);
   })(i,fr[i]);}
 }
- 
+
 function playEnemyDie(type){
   if(!AC)return; var now=AC.currentTime;
   if(type==='dragon'){
@@ -407,7 +516,7 @@ function playEnemyDie(type){
     o.connect(g); g.connect(sfxGain); o.start(now); o.stop(now+0.3);
   }
 }
- 
+
 function playFootstep(){
   if(!AC)return; var now=AC.currentTime;
   var buf=AC.createBuffer(1,AC.sampleRate*0.055,AC.sampleRate),d=buf.getChannelData(0);
@@ -416,7 +525,7 @@ function playFootstep(){
   filt.type='lowpass'; filt.frequency.value=380; g.gain.value=0.10;
   s.buffer=buf; s.connect(filt); filt.connect(g); g.connect(sfxGain); s.start(now);
 }
- 
+
 // ── GAME VARS ─────────────────────────────────────────────
 var scene,camera,renderer,clock;
 var playerGroup,player;
@@ -437,7 +546,7 @@ var drops=[]; // world item drops {mesh, item, pos}
 var equippedWeapon=null, equippedArmor=null;
 var inventory=[]; // collected items {name, item}
 var panelOpen=false, currentTab='stats';
- 
+
 // ── ITEM DEFINITIONS ──────────────────────────────────────
 var WEAPONS={
   'Iron Sword':    {type:'weapon',slot:'weapon',atk:5, spd:0,  def:0,  color:0xaabbcc, rarity:'common',   desc:'+5 ATK'},
@@ -462,7 +571,7 @@ var ARMORS={
   'Dragon Armor':   {type:'armor',slot:'armor',atk:5,spd:0,     def:65,maxHp:150,color:0xcc3300, rarity:'legendary',armorType:'dragon',  desc:'+65 DEF +150 HP FIRE'}
 };
 var RARITY_COLORS={common:'#aaaaaa',uncommon:'#22cc44',rare:'#2288ff',epic:'#aa22ff',legendary:'#ff8800'};
- 
+
 // Drop chances by enemy type
 var DROP_TABLE={
   skeleton: {chance:0.35,pool:['Iron Sword','Leather Vest','Dagger']},
@@ -473,71 +582,79 @@ var DROP_TABLE={
   dragon:   {chance:0.85,pool:['Longbow','Crossbow','Knight Armor','Dark Plate','Dragon Armor']},
   boss:     {chance:1.00,pool:['Flame Sword','Shadow Spear','Crossbow','Dark Plate','Dragon Armor','Knight Armor']}
 };
- 
+
 function lmat(c){return new THREE.MeshLambertMaterial({color:c});}
+function pmat(c,rough,metal){return new THREE.MeshStandardMaterial({color:c,roughness:rough!==undefined?rough:0.7,metalness:metal!==undefined?metal:0.0});}
 function bmat(c){return new THREE.MeshBasicMaterial({color:c});}
-function addM(p,g,m,x,y,z){var mesh=new THREE.Mesh(g,m);mesh.position.set(x||0,y||0,z||0);mesh.castShadow=true;p.add(mesh);return mesh;}
- 
+function addM(p,g,m,x,y,z){var mesh=new THREE.Mesh(g,m);mesh.position.set(x||0,y||0,z||0);mesh.castShadow=true;mesh.receiveShadow=true;p.add(mesh);return mesh;}
+
 // ── INIT ──────────────────────────────────────────────────
 function makeGrassTexture(){
-  var c=document.createElement('canvas'); c.width=c.height=256;
+  var c=document.createElement('canvas'); c.width=c.height=512;
   var cx=c.getContext('2d');
-  // Rich base gradient
-  var grad=cx.createRadialGradient(128,128,0,128,128,180);
-  grad.addColorStop(0,'#38a030'); grad.addColorStop(1,'#1d6614');
-  cx.fillStyle=grad; cx.fillRect(0,0,256,256);
-  // Multi-tone grass patches
-  for(var i=0;i<200;i++){
-    var gx=Math.random()*256,gy=Math.random()*256,gr=1.5+Math.random()*7;
-    var lum=Math.floor(30+Math.random()*60);
-    var r=Math.floor(18+lum*.28),g=Math.floor(75+lum),b=Math.floor(14+lum*.18);
-    cx.fillStyle='rgba('+r+','+g+','+b+','+(0.35+Math.random()*.45)+')';
-    cx.beginPath(); cx.ellipse(gx,gy,gr,gr*(0.6+Math.random()*.8),Math.random()*Math.PI,0,Math.PI*2); cx.fill();
+  var grad=cx.createRadialGradient(256,256,0,256,256,320);
+  grad.addColorStop(0,'#3aaa28'); grad.addColorStop(0.5,'#2d8a1e'); grad.addColorStop(1,'#1a6010');
+  cx.fillStyle=grad; cx.fillRect(0,0,512,512);
+  // Rich varied grass patches
+  for(var i=0;i<500;i++){
+    var gx=Math.random()*512,gy=Math.random()*512,gr=1+Math.random()*9;
+    var lum=Math.floor(20+Math.random()*70);
+    var r=Math.floor(12+lum*.22),g=Math.floor(60+lum),b=Math.floor(8+lum*.12);
+    cx.fillStyle='rgba('+r+','+g+','+b+','+(0.25+Math.random()*.55)+')';
+    cx.beginPath(); cx.ellipse(gx,gy,gr,gr*(0.5+Math.random()*.9),Math.random()*Math.PI,0,Math.PI*2); cx.fill();
   }
-  // Grass blade strokes
-  for(var i=0;i<180;i++){
-    var bx=Math.random()*256,by=Math.random()*256;
-    var bh=4+Math.random()*10, bw=0.6+Math.random()*1.2;
-    var dark=Math.random()>.55;
-    cx.strokeStyle=dark?'#145010':'#52c040';
-    cx.lineWidth=bw; cx.globalAlpha=0.55+Math.random()*.3;
-    cx.beginPath(); cx.moveTo(bx,by); cx.lineTo(bx+(Math.random()-.5)*3,by-bh); cx.stroke();
+  // Fine grass blades
+  for(var i=0;i<600;i++){
+    var bx=Math.random()*512,by=Math.random()*512;
+    var bh=3+Math.random()*12,bw=0.4+Math.random()*1.0;
+    var dark=Math.random()>.5;
+    cx.strokeStyle=dark?'#0f400a':'#4aaa30';
+    cx.lineWidth=bw; cx.globalAlpha=0.4+Math.random()*.4;
+    cx.beginPath(); cx.moveTo(bx,by); cx.bezierCurveTo(bx+(Math.random()-.5)*4,by-bh*0.5,bx+(Math.random()-.5)*3,by-bh*0.8,bx+(Math.random()-.5)*2,by-bh); cx.stroke();
   }
   cx.globalAlpha=1;
-  // Dirt spots
-  for(var i=0;i<30;i++){
-    var dx=Math.random()*256,dy=Math.random()*256,dr=2+Math.random()*5;
-    cx.fillStyle='rgba(100,72,30,0.22)';
+  // Subtle stone/dirt patches
+  for(var i=0;i<60;i++){
+    var dx=Math.random()*512,dy=Math.random()*512,dr=1.5+Math.random()*4;
+    cx.fillStyle='rgba(90,65,28,0.18)';
     cx.beginPath(); cx.arc(dx,dy,dr,0,Math.PI*2); cx.fill();
   }
+  // Subtle moss highlights
+  for(var i=0;i<80;i++){
+    var mx=Math.random()*512,my=Math.random()*512,mr=2+Math.random()*5;
+    cx.fillStyle='rgba(20,80,10,0.12)';
+    cx.beginPath(); cx.arc(mx,my,mr,0,Math.PI*2); cx.fill();
+  }
   var tex=new THREE.CanvasTexture(c);
-  tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.repeat.set(22,22);
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.repeat.set(30,30);
+  tex.anisotropy=16;
   return tex;
 }
- 
+
 function init(){
   var sc=document.getElementById('slashCanvas');
   slashW=sc.width=window.innerWidth; slashH=sc.height=window.innerHeight;
   slashCtx=sc.getContext('2d');
- 
+
   grassTex=makeGrassTexture();
- 
+
   scene=new THREE.Scene();
-  scene.fog=new THREE.Fog(0x4488cc,50,180);
-  scene.background=new THREE.Color(0x1a6fbb);
-  camera=new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,250);
+  scene.fog=new THREE.FogExp2(0x7ab8d4,0.008);
+  scene.background=new THREE.Color(0x4a90c4);
+  camera=new THREE.PerspectiveCamera(58,window.innerWidth/window.innerHeight,0.1,300);
   var canvas=document.getElementById('gameCanvas');
-  renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true});
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true,powerPreference:'high-performance'});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,3));
   renderer.setSize(window.innerWidth,window.innerHeight);
   renderer.shadowMap.enabled=true;
   renderer.shadowMap.type=THREE.PCFSoftShadowMap;
   renderer.toneMapping=THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure=1.15;
+  renderer.toneMappingExposure=1.3;
+  renderer.outputEncoding=THREE.sRGBEncoding;
   clock=new THREE.Clock();
- 
+
   setupLights(); buildGround(); buildMountains(); buildBgCastles(); buildFortress(); buildPlayer(); buildClouds();
- 
+
   window.addEventListener('resize',function(){
     camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth,window.innerHeight);
@@ -545,95 +662,271 @@ function init(){
   });
   setupInput(); animate();
 }
- 
+
 function setupLights(){
-  var sun=new THREE.DirectionalLight(0xffe8c0,2.8);
-  sun.position.set(25,55,15); sun.castShadow=true;
-  sun.shadow.mapSize.width=sun.shadow.mapSize.height=2048;
-  sun.shadow.camera.near=0.5; sun.shadow.camera.far=170;
-  sun.shadow.camera.left=-70; sun.shadow.camera.right=70;
-  sun.shadow.camera.top=70;   sun.shadow.camera.bottom=-70;
+  // Main sun — warm golden hour
+  var sun=new THREE.DirectionalLight(0xfff0cc,3.2);
+  sun.position.set(30,65,20); sun.castShadow=true;
+  sun.shadow.mapSize.width=sun.shadow.mapSize.height=4096;
+  sun.shadow.camera.near=0.5; sun.shadow.camera.far=200;
+  sun.shadow.camera.left=-120; sun.shadow.camera.right=120;
+  sun.shadow.camera.top=120; sun.shadow.camera.bottom=-120;
+  sun.shadow.bias=-0.0003;
+  sun.shadow.normalBias=0.02;
   scene.add(sun);
-  scene.add(new THREE.AmbientLight(0x6090cc,0.9));
-  scene.add(new THREE.HemisphereLight(0x88bbff,0x336600,0.8));
-  var fill=new THREE.DirectionalLight(0x99ccff,0.5);
-  fill.position.set(-20,15,-15); scene.add(fill);
+  // Ambient sky light
+  scene.add(new THREE.AmbientLight(0x88aadd,0.7));
+  // Sky hemisphere — blue sky / green ground
+  scene.add(new THREE.HemisphereLight(0x9ec8ff,0x447722,1.1));
+  // Warm fill from opposite side
+  var fill=new THREE.DirectionalLight(0xffcc88,0.6);
+  fill.position.set(-25,20,-20); scene.add(fill);
+  // Soft cool back rim
+  var rim=new THREE.DirectionalLight(0x8888ff,0.3);
+  rim.position.set(0,10,-30); scene.add(rim);
 }
- 
+
+// River segments: array of {x1,z1,x2,z2,w} line segments for collision
+var riverSegments=[];
+// Building colliders stored in main colliders array with r
+// Minimap canvas
+var minimapCtx=null, MINIMAP_SCALE=130/200; // 200 = map half display radius
+
 function buildGround(){
   colliders=[];
-  // Simple large flat green ground — no vertex displacement (was causing blue void)
+  riverSegments=[];
+
+  // ── Big flat ground — 400x400 ──
   var ground=new THREE.Mesh(
-    new THREE.PlaneGeometry(200,200,1,1),
+    new THREE.PlaneGeometry(400,400,1,1),
     new THREE.MeshLambertMaterial({map:grassTex})
   );
   ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
- 
-  // Colour variety patches on top
+
+  // Colour variety patches
   var patchCols=[0x1a7a10,0x228800,0x2a9918,0x3aaa22,0x156010];
-  for(var i=0;i<80;i++){
-    var a=Math.random()*Math.PI*2, r=3+Math.random()*52;
-    var p=new THREE.Mesh(
-      new THREE.CircleGeometry(0.5+Math.random()*2.5,7),
-      lmat(patchCols[i%patchCols.length])
-    );
-    p.rotation.x=-Math.PI/2; p.position.set(Math.cos(a)*r,0.01,Math.sin(a)*r);
-    scene.add(p);
+  for(var i=0;i<180;i++){
+    var a=Math.random()*Math.PI*2, r=4+Math.random()*88;
+    var p=new THREE.Mesh(new THREE.CircleGeometry(0.6+Math.random()*3.5,7),lmat(patchCols[i%patchCols.length]));
+    p.rotation.x=-Math.PI/2; p.position.set(Math.cos(a)*r,0.01,Math.sin(a)*r); scene.add(p);
   }
-  // Dirt path patches
-  for(var i=0;i<20;i++){
-    var a=Math.random()*Math.PI*2, r=4+Math.random()*30;
-    var dp=new THREE.Mesh(new THREE.CircleGeometry(0.5+Math.random()*1.2,8),lmat(0x9a7744));
-    dp.rotation.x=-Math.PI/2; dp.position.set(Math.cos(a)*r,0.012,Math.sin(a)*r);
-    scene.add(dp);
-  }
- 
+
   // Rocks with colliders
-  for(var i=0;i<32;i++){
-    var a=Math.random()*Math.PI*2, r=12+Math.random()*38;
-    var rx=Math.cos(a)*r, rz=Math.sin(a)*r, rs=0.4+Math.random()*0.9;
+  for(var i=0;i<55;i++){
+    var a=Math.random()*Math.PI*2, r=15+Math.random()*72;
+    var rx=Math.cos(a)*r, rz=Math.sin(a)*r, rs=0.4+Math.random()*1.0;
     var rock=addM(scene,new THREE.DodecahedronGeometry(rs,0),lmat(0x887766),rx,rs*0.4,rz);
     rock.rotation.set(Math.random()*3,Math.random()*3,Math.random()*3);
     addM(scene,new THREE.SphereGeometry(rs*0.5,5,4),lmat(0x447730),rx,rs*0.82,rz).scale.y=0.18;
     colliders.push({x:rx,z:rz,r:rs+0.45});
   }
- 
-  // Trees with colliders
-  for(var i=0;i<50;i++){
-    var a=Math.random()*Math.PI*2, r=15+Math.random()*38;
+
+  // Trees — more and spread further
+  for(var i=0;i<110;i++){
+    var a=Math.random()*Math.PI*2, r=18+Math.random()*72;
+    // avoid river zone (x: -5..5, z: -90..90)
     var tx=Math.cos(a)*r, tz=Math.sin(a)*r;
+    if(Math.abs(tx)<8&&Math.abs(tz)<92)tx+=tx>0?9:-9;
     buildTree(tx,0,tz);
     colliders.push({x:tx,z:tz,r:1.2});
   }
- 
+
   // Decorative bushes
   var bushCols=[0xdd3322,0xffaa00,0xee5599,0xffd700,0xff6688];
-  for(var i=0;i<22;i++){
-    var a=Math.random()*Math.PI*2, r=8+Math.random()*44;
+  for(var i=0;i<50;i++){
+    var a=Math.random()*Math.PI*2, r=10+Math.random()*80;
     var bx=Math.cos(a)*r, bz=Math.sin(a)*r;
     var bush=new THREE.Group();
     for(var j=0;j<4+Math.floor(Math.random()*3);j++){
       var bc=bushCols[Math.floor(Math.random()*bushCols.length)];
-      addM(bush,new THREE.SphereGeometry(0.18+Math.random()*0.22,6,5),lmat(bc),
-        (Math.random()-0.5)*0.7, Math.random()*0.4, (Math.random()-0.5)*0.7);
+      addM(bush,new THREE.SphereGeometry(0.18+Math.random()*0.22,6,5),lmat(bc),(Math.random()-0.5)*0.7,Math.random()*0.4,(Math.random()-0.5)*0.7);
     }
     addM(bush,new THREE.CylinderGeometry(0.06,0.1,0.45,5),lmat(0x5c3311),0,0.18,0);
     bush.position.set(bx,0,bz); scene.add(bush);
   }
+
+  // ── RIVER ── runs roughly north-south with a slight curve
+  buildRiver();
+
+  // ── MEDIEVAL BUILDINGS ──
+  buildVillage();
+
+  // Setup minimap
+  minimapCtx=document.getElementById('minimapCanvas').getContext('2d');
 }
- 
+
+function buildRiver(){
+  // River path: series of points running north-south, slightly curved
+  var riverPts=[
+    {x:-4,z:-92},{x:-5,z:-70},{x:-3,z:-50},{x:2,z:-30},{x:5,z:-10},
+    {x:4,z:10},{x:2,z:30},{x:-2,z:50},{x:-4,z:70},{x:-3,z:92}
+  ];
+  var riverW=7; // river half-width
+  var waterMat=new THREE.MeshLambertMaterial({color:0x2255aa,transparent:true,opacity:0.82});
+  var bankMat=lmat(0x8a7340);
+
+  for(var i=0;i<riverPts.length-1;i++){
+    var p0=riverPts[i], p1=riverPts[i+1];
+    var dx=p1.x-p0.x, dz=p1.z-p0.z;
+    var len=Math.sqrt(dx*dx+dz*dz);
+    var mx=(p0.x+p1.x)/2, mz=(p0.z+p1.z)/2;
+    var ang=Math.atan2(dx,dz);
+
+    // Water surface
+    var water=new THREE.Mesh(new THREE.PlaneGeometry(riverW*2,len+1,1,1),waterMat);
+    water.rotation.x=-Math.PI/2; water.position.set(mx,-0.04,mz);
+    water.rotation.z=-ang; scene.add(water);
+
+    // Muddy banks
+    var bankL=new THREE.Mesh(new THREE.PlaneGeometry(2,len+1,1,1),bankMat);
+    bankL.rotation.x=-Math.PI/2; bankL.position.set(mx+Math.cos(ang+Math.PI/2)*(riverW+1),0.01,mz+Math.sin(ang+Math.PI/2)*(riverW+1));
+    bankL.rotation.z=-ang; scene.add(bankL);
+    var bankR=new THREE.Mesh(new THREE.PlaneGeometry(2,len+1,1,1),bankMat);
+    bankR.rotation.x=-Math.PI/2; bankR.position.set(mx-Math.cos(ang+Math.PI/2)*(riverW+1),0.01,mz-Math.sin(ang+Math.PI/2)*(riverW+1));
+    bankR.rotation.z=-ang; scene.add(bankR);
+
+    // Register as river segment for collision
+    riverSegments.push({x1:p0.x,z1:p0.z,x2:p1.x,z2:p1.z,w:riverW});
+  }
+
+  // ── BRIDGE at z=0 crossing point ──
+  var bMat=lmat(0x8a6030);
+  var stoneMat=lmat(0x998877);
+  // Bridge deck — 4 wide, 14 long spanning the river
+  var deck=new THREE.Mesh(new THREE.BoxGeometry(14,0.5,4.5),bMat);
+  deck.position.set(0,0.22,0); scene.add(deck); deck.receiveShadow=true; deck.castShadow=true;
+  // Bridge planks
+  for(var bi=-5;bi<=5;bi++){
+    var plank=addM(scene,new THREE.BoxGeometry(1.0,0.15,4.2),lmat(0x7a5020),bi*1.15,0.5,0);
+  }
+  // Stone arch supports
+  for(var si=-1;si<=1;si+=2){
+    var arch=addM(scene,new THREE.CylinderGeometry(0.6,0.8,2.2,8),stoneMat,si*5,0,0);
+    addM(scene,new THREE.BoxGeometry(2,0.4,5),stoneMat,si*5,1.3,0);
+  }
+  // Bridge railings
+  for(var ri=0;ri<2;ri++){
+    var rz=ri===0?2:-2;
+    for(var rp=-5;rp<=5;rp++){
+      addM(scene,new THREE.CylinderGeometry(0.08,0.08,0.9,5),stoneMat,rp*1.2,0.9,rz);
+    }
+    addM(scene,new THREE.BoxGeometry(13,0.12,0.12),stoneMat,0,1.35,rz);
+  }
+
+  // Bridge is a crossing — add gap in river collision at z=0 area
+  riverSegments.push({BRIDGE:true,x:0,z:0,w:8,len:8}); // marker for bridge, not a blocker
+}
+
+function buildVillage(){
+  // Place 8 medieval houses in clusters around the map
+  var houseDefs=[
+    {x:22,z:18,rot:0.3},{x:28,z:22,rot:-0.2},{x:24,z:28,rot:0.8},
+    {x:-25,z:15,rot:1.1},{x:-30,z:22,rot:0.5},
+    {x:20,z:-25,rot:-0.5},{x:26,z:-32,rot:0.4},
+    {x:-22,z:-28,rot:2.1},{x:-28,z:-22,rot:1.8},
+    {x:55,z:40,rot:0.2},{x:60,z:46,rot:-0.3},
+    {x:-55,z:35,rot:1.3},{x:-60,z:42,rot:0.9}
+  ];
+  for(var i=0;i<houseDefs.length;i++){
+    var h=houseDefs[i];
+    buildMedievalHouse(h.x,h.z,h.rot);
+    colliders.push({x:h.x,z:h.z,r:4.5});
+  }
+  // Well in village center
+  buildWell(25,24);
+  buildWell(-27,18);
+}
+
+function buildMedievalHouse(x,z,rot){
+  var g=new THREE.Group();
+  var wallMat=lmat(0xc8a878); // sandstone walls
+  var darkWallMat=lmat(0xa08055);
+  var roofMat=lmat(0x882222); // red-brown roof
+  var beamMat=lmat(0x5c3311); // dark wood beams
+  var chimMat=lmat(0x776655); // chimney stone
+  var ww=5,wh=3,wd=4; // width, height, depth
+
+  // Main walls
+  addM(g,new THREE.BoxGeometry(ww,wh,wd),wallMat,0,wh/2,0);
+  // Half-timber beams overlay
+  for(var bi=0;bi<3;bi++){
+    var bx=((bi/(2))-0.5)*(ww-0.5);
+    var vb=addM(g,new THREE.BoxGeometry(0.15,wh,0.05),beamMat,bx,wh/2,wd/2+0.01);
+  }
+  // Horizontal beams
+  for(var bj=0;bj<2;bj++){
+    addM(g,new THREE.BoxGeometry(ww+0.2,0.15,0.05),beamMat,0,0.8+bj*1.1,wd/2+0.01);
+  }
+  // Roof — pitched gable
+  var roofH=2.2;
+  var roof=addM(g,new THREE.CylinderGeometry(0.01,Math.sqrt(ww*ww/4+roofH*roofH)*0.72,roofH,4),roofMat,0,wh+roofH/2,0);
+  roof.rotation.y=Math.PI/4;
+  // Roof overhang trim
+  addM(g,new THREE.BoxGeometry(ww+0.4,0.12,wd+0.4),beamMat,0,wh+0.06,0);
+  // Chimney
+  addM(g,new THREE.BoxGeometry(0.7,1.8,0.7),chimMat,ww/2-0.6,wh+roofH*0.6,0);
+  addM(g,new THREE.BoxGeometry(0.9,0.2,0.9),chimMat,ww/2-0.6,wh+roofH*0.6+0.9,0);
+  // Door
+  addM(g,new THREE.BoxGeometry(0.8,1.6,0.08),lmat(0x3a1e05),0,0.8,wd/2+0.02);
+  // Windows
+  for(var wi=-1;wi<=1;wi+=2){
+    addM(g,new THREE.BoxGeometry(0.7,0.7,0.08),lmat(0x99ccdd),wi*1.4,1.6,wd/2+0.02);
+    // Window frame
+    addM(g,new THREE.BoxGeometry(0.75,0.08,0.06),beamMat,wi*1.4,1.25,wd/2+0.03);
+    addM(g,new THREE.BoxGeometry(0.75,0.08,0.06),beamMat,wi*1.4,1.95,wd/2+0.03);
+  }
+  // Foundation stones
+  addM(g,new THREE.BoxGeometry(ww+0.3,0.3,wd+0.3),lmat(0x888070),0,0.15,0);
+
+  g.position.set(x,0,z); g.rotation.y=rot; scene.add(g);
+}
+
+function buildWell(x,z){
+  var g=new THREE.Group();
+  var stoneMat=lmat(0x998877);
+  // Well base ring
+  var base=addM(g,new THREE.CylinderGeometry(0.9,1.0,0.8,12),stoneMat,0,0.4,0);
+  // Well rim
+  addM(g,new THREE.TorusGeometry(0.95,0.12,6,12),stoneMat,0,0.82,0);
+  // Posts
+  for(var pi=0;pi<2;pi++){
+    var px=pi===0?-0.8:0.8;
+    addM(g,new THREE.CylinderGeometry(0.07,0.07,1.4,6),lmat(0x5c3311),px,1.5,0);
+  }
+  // Roof beam
+  addM(g,new THREE.BoxGeometry(2.0,0.15,0.15),lmat(0x5c3311),0,2.2,0);
+  // Bucket
+  addM(g,new THREE.CylinderGeometry(0.12,0.10,0.22,8),lmat(0x7a5020),0,1.4,0);
+  colliders.push({x:x,z:z,r:1.2});
+  g.position.set(x,0,z); scene.add(g);
+}
+
 function buildTree(x,y,z){
   var g=new THREE.Group();
-  // Trunk with taper + knot bump
-  addM(g,new THREE.CylinderGeometry(.12,.30,3.0,8),lmat(0x5c3311),0,1.5,0);
-  addM(g,new THREE.SphereGeometry(.18,6,5),lmat(0x4a2a0e),0,0.4,0);
-  // Layered foliage — richer colors
-  var lc=[0x0f6600,0x1a8800,0x0d5500,0x228800,0x145500];
-  var lrs=[1.65,1.30,0.95,0.65],lhs=[2.1,1.85,1.65,1.45];
-  for(var i=0;i<4;i++) addM(g,new THREE.ConeGeometry(lrs[i],2.0,9),lmat(lc[i%lc.length]),0,lhs[i]+i*1.1,0);
+  // HD trunk — more segments, tapered, with bark color variation
+  addM(g,new THREE.CylinderGeometry(.10,.32,3.2,12),pmat(0x4a2808,0.9,0.0),0,1.6,0);
+  addM(g,new THREE.CylinderGeometry(.13,.18,0.8,10),pmat(0x3d2006,0.95,0.0),0,0.4,0);
+  addM(g,new THREE.SphereGeometry(.14,8,6),pmat(0x4a2808,0.9,0.0),0,0.5,0);
+  // Root bumps for realism
+  for(var ri=0;ri<4;ri++){
+    var ra=(ri/4)*Math.PI*2;
+    var root=addM(g,new THREE.CylinderGeometry(0.06,0.12,0.5,6),pmat(0x3a1e05,0.95,0.0),Math.cos(ra)*0.22,0.25,Math.sin(ra)*0.22);
+    root.rotation.z=Math.cos(ra)*0.4; root.rotation.x=Math.sin(ra)*0.4;
+  }
+  // Layered foliage cones — richer colors, more segments for smooth silhouette
+  var lc=[0x0e5c00,0x157a00,0x0a4800,0x1a8800,0x114400,0x1d9900];
+  var lrs=[1.80,1.45,1.10,0.78,0.52],lhs=[2.2,2.0,1.8,1.6,1.45];
+  for(var i=0;i<5;i++){
+    var cone=addM(g,new THREE.ConeGeometry(lrs[i],2.2,12),pmat(lc[i%lc.length],0.85,0.0),0,lhs[i]+i*1.05,0);
+    // Slight random tilt for natural look
+    cone.rotation.x=(Math.random()-0.5)*0.08;
+    cone.rotation.z=(Math.random()-0.5)*0.08;
+  }
+  // Top cap
+  addM(g,new THREE.SphereGeometry(0.38,8,6),pmat(lc[0],0.85,0.0),0,lhs[4]+5*1.05+1.0,0);
   g.position.set(x,y,z); scene.add(g);
 }
- 
+
 function buildMountains(){
   var defs=[[0,110,38,28],[22,105,28,22],[45,115,44,32],[70,108,32,24],[90,112,50,36],[115,105,36,26],[135,118,42,30],[160,110,30,22],[180,112,46,34],[200,108,28,20],[225,115,52,38],[250,106,34,26],[270,110,44,32],[295,114,30,22],[315,108,40,30],[340,112,26,20]];
   for(var di=0;di<defs.length;di++){
@@ -653,7 +946,7 @@ function buildMountains(){
     hill.scale.y=h/w; hill.position.set(Math.cos(a)*r,0,Math.sin(a)*r); scene.add(hill);
   }
 }
- 
+
 function buildBgCastle(cx,cz,sc2,ay){
   var g=new THREE.Group(),kw=7*sc2,kh=10*sc2;
   addM(g,new THREE.BoxGeometry(kw,kh,kw),lmat(0xaa9977),0,kh/2,0);
@@ -667,7 +960,7 @@ function buildBgCastle(cx,cz,sc2,ay){
   g.position.set(cx,0,cz); g.rotation.y=ay; scene.add(g);
 }
 function buildBgCastles(){buildBgCastle(55,-75,.8,.3);buildBgCastle(-70,-60,.7,-.5);buildBgCastle(72,50,.65,.9);buildBgCastle(-60,65,.75,2.1);buildBgCastle(5,-90,.9,0);buildBgCastle(-85,-10,.6,1.2);}
- 
+
 function buildFortress(){
   var sm=lmat(0xaa9966),dm=lmat(0x223366);
   addM(scene,new THREE.BoxGeometry(10,12,10),sm,0,6,-35);
@@ -676,7 +969,7 @@ function buildFortress(){
   var walls=[[0,2,-28,17,4.5,1],[0,2,-42,17,4.5,1],[-9,2,-35,1,4.5,14],[9,2,-35,1,4.5,14]];
   for(var i=0;i<walls.length;i++){var w=walls[i];addM(scene,new THREE.BoxGeometry(w[3],w[4],w[5]),sm,w[0],w[1],w[2]);}
 }
- 
+
 function buildClouds(){
   var cm=new THREE.MeshLambertMaterial({color:0xffffff,transparent:true,opacity:.92});
   for(var i=0;i<20;i++){
@@ -694,7 +987,7 @@ function buildPlayer(){
   var goldM=lmat(0xffcc00),redM=lmat(0xdd1111),lthM=lmat(0x7a4a1a);
   var bootM=lmat(0x2a1208),bladeM=lmat(0xddeeff);
   var capeM=new THREE.MeshLambertMaterial({color:0xcc0000,side:THREE.DoubleSide});
- 
+
   // Tag body/armor meshes for recoloring
   var body1=addM(playerGroup,new THREE.CylinderGeometry(.20,.16,.22,10),lthM,0,.70,0);  body1.userData.isBodyPart=true; body1.userData.isArmorMesh=true;
   addM(playerGroup,new THREE.CylinderGeometry(.20,.20,.07,12),goldM,0,.83,0);
@@ -710,7 +1003,7 @@ function buildPlayer(){
   var eyeM2=bmat(0x00ffee);
   addM(playerGroup,new THREE.SphereGeometry(.034,6,4),eyeM2,-.067,1.76,.19);
   addM(playerGroup,new THREE.SphereGeometry(.034,6,4),eyeM2,.067,1.76,.19);
- 
+
   // Legs
   var legXs=[-.11,.11];
   for(var li=0;li<legXs.length;li++){
@@ -722,7 +1015,7 @@ function buildPlayer(){
     var toe=addM(piv,new THREE.SphereGeometry(.088,8,5),bootM,0,-.99,.07);toe.scale.set(1,.54,1.35);
     piv.userData.isLeg=true; playerGroup.add(piv);
   }
- 
+
   // Sword arm (right side, +x)
   var swordArm=new THREE.Group(); swordArm.position.set(.32,1.47,0);
   addM(swordArm,new THREE.CylinderGeometry(.077,.066,.31,10),steelM,0,-.16,0);
@@ -735,7 +1028,7 @@ function buildPlayer(){
   addM(swordArm,new THREE.SphereGeometry(.048,8,6),goldM,0,-.76,0);
   addM(swordArm,new THREE.CylinderGeometry(.029,.026,.21,8),lthM,0,-.88,0);
   swordArm.userData.isSwordArm=true; playerGroup.add(swordArm);
- 
+
   // Shield arm (left side, -x) — shield raised visibly forward
   var shieldArm=new THREE.Group(); shieldArm.position.set(-.32,1.47,0);
   addM(shieldArm,new THREE.CylinderGeometry(.077,.066,.31,10),steelM,0,-.16,0);
@@ -750,10 +1043,10 @@ function buildPlayer(){
   sg.rotation.y=Math.PI/2;
   sg.position.set(.08,-.45,.22); // offset forward and out
   shieldArm.add(sg); playerGroup.add(shieldArm);
- 
+
   addM(playerGroup,new THREE.PlaneGeometry(.54,.84,1,6),capeM,0,1.12,-.25);
   playerGroup.position.set(0,0,0); scene.add(playerGroup);
- 
+
   player={
     group:playerGroup,
     velocity:new THREE.Vector3(),
@@ -767,13 +1060,13 @@ function buildPlayer(){
 // ── ENEMIES ───────────────────────────────────────────────
 function spawnEnemy(type,x,z){
   var g=new THREE.Group(),hp,spd,atk,reward,size,ranged=false,flying=false;
-  if(type==='skeleton'){hp=30+waveNum*8;spd=.026+waveNum*.002;atk=8;reward=10;size=1.0;}
-  else if(type==='soldier'){hp=55+waveNum*10;spd=.020+waveNum*.002;atk=14;reward=18;size=1.05;}
-  else if(type==='orc'){hp=80+waveNum*15;spd=.016+waveNum*.002;atk=20;reward=28;size=1.3;}
-  else if(type==='vampire'){hp=60+waveNum*12;spd=.030+waveNum*.003;atk=16;reward=30;size=1.0;ranged=true;}
-  else if(type==='miniboss'){hp=200+waveNum*25;spd=.018+waveNum*.002;atk=26;reward=80;size=1.5;}
-  else if(type==='dragon'){hp=180+waveNum*30;spd=.022+waveNum*.002;atk=22;reward=100;size=1.4;ranged=true;flying=true;}
-  else{hp=500+waveNum*60;spd=.013;atk=35;reward=250;size=2.0;}
+  if(type==='skeleton'){hp=30+waveNum*8;spd=.026+waveNum*.002;atk=16;reward=10;size=1.0;}
+  else if(type==='soldier'){hp=55+waveNum*10;spd=.020+waveNum*.002;atk=28;reward=18;size=1.05;}
+  else if(type==='orc'){hp=80+waveNum*15;spd=.016+waveNum*.002;atk=40;reward=28;size=1.3;}
+  else if(type==='vampire'){hp=60+waveNum*12;spd=.030+waveNum*.003;atk=32;reward=30;size=1.0;ranged=true;}
+  else if(type==='miniboss'){hp=200+waveNum*25;spd=.018+waveNum*.002;atk=52;reward=80;size=1.5;}
+  else if(type==='dragon'){hp=180+waveNum*30;spd=.022+waveNum*.002;atk=44;reward=100;size=1.4;ranged=true;flying=true;}
+  else{hp=500+waveNum*60;spd=.013;atk=70;reward=250;size=2.0;}
   if(type==='skeleton')buildSkeleton(g,size);
   else if(type==='soldier')buildSoldier(g,size);
   else if(type==='orc')buildOrc(g,size);
@@ -788,7 +1081,7 @@ function spawnEnemy(type,x,z){
     ranged:ranged,flying:flying,wingAnim:Math.random()*Math.PI*2};
   enemies.push(e); waveCount++; return e;
 }
- 
+
 function buildSkeleton(g,s){
   var bone=lmat(0xddd5a8),eyeM=bmat(0x00ff88),rust=lmat(0x996633);
   addM(g,new THREE.CylinderGeometry(.10*s,.08*s,.15*s,8),bone,0,.62*s,0);
@@ -800,7 +1093,7 @@ function buildSkeleton(g,s){
   addM(g,new THREE.SphereGeometry(.040*s,6,5),eyeM,-.057*s,1.54*s,.13*s);
   addM(g,new THREE.SphereGeometry(.040*s,6,5),eyeM,.057*s,1.54*s,.13*s);
   addM(g,new THREE.CylinderGeometry(.088*s,.073*s,.082*s,8,1,true),bone,0,1.39*s,.02*s);
-  for(var si=0;si<2;si++){var side=si===0?-1:1;addM(g,new THREE.SphereGeometry(.070*s,8,6),bone,side*.20*s,1.24*s,0);var ua=addM(g,new THREE.CylinderGeometry(.026*s,.021*s,.29*s,6),bone,side*.25*s,1.07*s,0);ua.rotation.z=side*.26;addM(g,new THREE.SphereGeometry(.037*s,6,5),bone,side*.29*s,.91*s,0);var la=addM(g,new THREE.CylinderGeometry(.023*s,.019*s,.27*s,6),bone,side*.32*s,.75*s,0);la.rotation.z=side*.16;}
+  for(var si=0;si<2;si++){var side=si===0?-1:1;addM(g,new THREE.SphereGeometry(.070*s,8,6),bone,side*.20*s,1.24*s,0);var ua=addM(g,new THREE.CylinderGeometry(.026*s,.021*s,.29*s,6),bone,side*.25*s,1.07*s,0);ua.rotation.z=side*.26;ua.userData.isArm=true;ua.userData.side=side;addM(g,new THREE.SphereGeometry(.037*s,6,5),bone,side*.29*s,.91*s,0);var la=addM(g,new THREE.CylinderGeometry(.023*s,.019*s,.27*s,6),bone,side*.32*s,.75*s,0);la.rotation.z=side*.16;}
   addM(g,new THREE.CylinderGeometry(.019*s,.011*s,.75*s,5),rust,.42*s,.62*s,0);
   var sg2=addM(g,new THREE.CylinderGeometry(.011*s,.011*s,.25*s,4),bone,.42*s,.86*s,0);sg2.rotation.z=Math.PI/2;
   var lxs=[-.092,.092];
@@ -816,7 +1109,7 @@ function buildSoldier(g,s){
   var ns=addM(g,new THREE.CylinderGeometry(.02*s,.014*s,.20*s,5),steelM,0,1.60*s,.20*s);ns.rotation.x=Math.PI/2;
   addM(g,new THREE.SphereGeometry(.032*s,6,5),eyeM,-.065*s,1.63*s,.19*s);
   addM(g,new THREE.SphereGeometry(.032*s,6,5),eyeM,.065*s,1.63*s,.19*s);
-  for(var si=0;si<2;si++){var side=si===0?-1:1;addM(g,new THREE.SphereGeometry(.14*s,10,7),steelM,side*.30*s,1.32*s,0);var ua=addM(g,new THREE.CylinderGeometry(.088*s,.075*s,.31*s,10),steelM,side*.36*s,1.08*s,0);ua.rotation.z=side*.25;var la=addM(g,new THREE.CylinderGeometry(.075*s,.063*s,.29*s,8),skinM,side*.43*s,.78*s,0);la.rotation.z=side*.15;}
+  for(var si=0;si<2;si++){var side=si===0?-1:1;addM(g,new THREE.SphereGeometry(.14*s,10,7),steelM,side*.30*s,1.32*s,0);var ua=addM(g,new THREE.CylinderGeometry(.088*s,.075*s,.31*s,10),steelM,side*.36*s,1.08*s,0);ua.rotation.z=side*.25;ua.userData.isArm=true;ua.userData.side=side;var la=addM(g,new THREE.CylinderGeometry(.075*s,.063*s,.29*s,8),skinM,side*.43*s,.78*s,0);la.rotation.z=side*.15;}
   addM(g,new THREE.CylinderGeometry(.025*s,.020*s,1.30*s,6),lmat(0x6e3a11),.55*s,.90*s,0);
   addM(g,new THREE.ConeGeometry(.06*s,.28*s,5),steelM,.55*s,1.58*s,0);
   var lxs=[-.12,.12];
@@ -832,7 +1125,7 @@ function buildOrc(g,s){
   addM(g,new THREE.SphereGeometry(.044*s,6,5),eyeM,-.082*s,1.64*s,.20*s);
   addM(g,new THREE.SphereGeometry(.044*s,6,5),eyeM,.082*s,1.64*s,.20*s);
   for(var ti=0;ti<2;ti++){var tx=ti===0?-.063:.063;var tusk=addM(g,new THREE.CylinderGeometry(.019*s,.011*s,.15*s,5),tuskM,tx*s,1.52*s,.17*s);tusk.rotation.x=-.52;}
-  for(var si=0;si<2;si++){var side=si===0?-1:1;addM(g,new THREE.SphereGeometry(.17*s,10,7),skinM,side*.40*s,1.30*s,0);addM(g,new THREE.ConeGeometry(.044*s,.16*s,6),metalM,side*.43*s,1.45*s,0);var ua=addM(g,new THREE.CylinderGeometry(.104*s,.088*s,.34*s,10),skinM,side*.47*s,1.06*s,0);ua.rotation.z=side*.36;var la=addM(g,new THREE.CylinderGeometry(.088*s,.073*s,.31*s,8),skinM,side*.54*s,.76*s,0);la.rotation.z=side*.21;}
+  for(var si=0;si<2;si++){var side=si===0?-1:1;addM(g,new THREE.SphereGeometry(.17*s,10,7),skinM,side*.40*s,1.30*s,0);addM(g,new THREE.ConeGeometry(.044*s,.16*s,6),metalM,side*.43*s,1.45*s,0);var ua=addM(g,new THREE.CylinderGeometry(.104*s,.088*s,.34*s,10),skinM,side*.47*s,1.06*s,0);ua.rotation.z=side*.36;ua.userData.isArm=true;ua.userData.side=side;var la=addM(g,new THREE.CylinderGeometry(.088*s,.073*s,.31*s,8),skinM,side*.54*s,.76*s,0);la.rotation.z=side*.21;}
   addM(g,new THREE.CylinderGeometry(.032*s,.026*s,.95*s,6),lthM,.65*s,.92*s,0);
   var ax=addM(g,new THREE.CylinderGeometry(.065*s,.15*s,.26*s,5),metalM,.74*s,1.40*s,0);ax.rotation.z=Math.PI/2;
   var lxs=[-.145,.145];
@@ -926,7 +1219,7 @@ function startWave(w){
   else if(w<=9)types=['orc','vampire','miniboss','dragon'];
   else types=['miniboss','dragon','vampire'];
   var count=4+w*2;
-  for(var i=0;i<count;i++){(function(idx){setTimeout(function(){if(!gameRunning)return;var a=(idx/count)*Math.PI*2+Math.random()*.5,r=20+Math.random()*12;spawnEnemy(types[Math.floor(Math.random()*types.length)],Math.cos(a)*r,Math.sin(a)*r);},idx*320);})(i);}
+  for(var i=0;i<count;i++){(function(idx){setTimeout(function(){if(!gameRunning)return;var a=(idx/count)*Math.PI*2+Math.random()*.5,r=28+Math.random()*20;spawnEnemy(types[Math.floor(Math.random()*types.length)],Math.cos(a)*r,Math.sin(a)*r);},idx*320);})(i);}
   if(w%5===0)setTimeout(function(){if(gameRunning)spawnEnemy('boss',0,16);},count*320+600);
   if(w%3===0&&w%5!==0)setTimeout(function(){if(gameRunning)spawnEnemy('miniboss',12,8);},count*320+400);
   if(w>=4&&w%4===0)setTimeout(function(){if(gameRunning)spawnEnemy('dragon',-14,10);},count*320+300);
@@ -938,7 +1231,7 @@ function showBanner(w){
   document.getElementById('waveS').textContent=spec||'DEFEND THE REALM';
   el.classList.add('show'); setTimeout(function(){el.classList.remove('show');},3200);
 }
- 
+
 // ── COMBAT ────────────────────────────────────────────────
 function getWeaponType(){
   if(!equippedWeapon) return 'sword';
@@ -949,7 +1242,7 @@ function getWeaponType(){
   if(n.indexOf('Dagger')>=0) return 'dagger';
   return 'sword';
 }
- 
+
 function playerAttack(){
   if(atkCd>0||player.isAttacking)return;
   var wtype=getWeaponType();
@@ -977,7 +1270,7 @@ function playerAttack(){
     doSlashTrail(wtype);
   },delay);
 }
- 
+
 function fireBowShot(){
   if(!AC)return;
   // Arrow whoosh SFX
@@ -988,7 +1281,7 @@ function fireBowShot(){
   filt.type='bandpass'; filt.frequency.value=2400; filt.Q.value=1.2;
   g.gain.setValueAtTime(0.5,now); g.gain.exponentialRampToValueAtTime(0.001,now+0.15);
   s.buffer=buf; s.connect(filt); filt.connect(g); g.connect(sfxGain); s.start(now);
- 
+
   var isCross=getWeaponType()==='crossbow';
   var dir=player.direction.clone().normalize();
   var pm=new THREE.Mesh(
@@ -1004,7 +1297,7 @@ function fireBowShot(){
   var spd=isCross?24:18;
   projectiles.push({mesh:pm,vel:dir.clone().multiplyScalar(spd),life:2.5,dmg:Math.round(stats.atk*1.1),owner:'player',isArrow:true});
 }
- 
+
 function doSlashTrail(wtype){
   var wp=playerGroup.position.clone(); wp.y+=1.5;
   var reach=wtype==='spear'?3.2:1.8;
@@ -1019,7 +1312,7 @@ function doSlashTrail(wtype){
   }
   slashTrails.push({pts:pts,life:1.0});
 }
- 
+
 function hitEnemy(e,dmg){
   if(e.isDead)return;
   e.hp-=dmg; e.hitFlash=0.24;
@@ -1027,7 +1320,7 @@ function hitEnemy(e,dmg){
   floatText(e.group.position,'-'+dmg,'#ff4422');
   if(e.hp<=0)killEnemy(e);
 }
- 
+
 function killEnemy(e){
   e.isDead=true; stats.kills++; stats.gold+=e.reward; stats.xp+=e.reward;
   floatText(e.group.position,'+'+e.reward+'g','#ffdd00');
@@ -1047,7 +1340,7 @@ function killEnemy(e){
   enemies=enemies.filter(function(x){return x!==e;});
   updateHUD();
 }
- 
+
 // ── LOOT SYSTEM ───────────────────────────────────────────
 function maybeDropItem(e){
   var tbl=DROP_TABLE[e.type]; if(!tbl)return;
@@ -1062,7 +1355,7 @@ function maybeDropItem(e){
   var mesh=buildDropMesh(name,item,pos);
   drops.push({mesh:mesh,item:item,name:name,pos:pos,bob:Math.random()*Math.PI*2});
 }
- 
+
 function buildDropMesh(name,item,pos){
   var g=new THREE.Group();
   var rc=parseInt(RARITY_COLORS[item.rarity].replace('#',''),16);
@@ -1070,7 +1363,7 @@ function buildDropMesh(name,item,pos){
   var ring=new THREE.Mesh(new THREE.TorusGeometry(0.38,0.055,6,16),bmat(rc));
   ring.rotation.x=Math.PI/2; g.add(ring);
   var light=new THREE.PointLight(rc,2.5,3.5); light.position.y=0.5; g.add(light);
- 
+
   // 3D weapon/armor shape
   if(item.slot==='weapon'){
     var wc=item.color;
@@ -1138,11 +1431,11 @@ function buildDropMesh(name,item,pos){
       }
     }
   }
- 
+
   g.position.copy(pos); g.rotation.y=Math.random()*Math.PI*2; scene.add(g);
   return g;
 }
- 
+
 function updateDrops(dt){
   var t=performance.now()*0.001;
   var keepDrops=[];
@@ -1164,7 +1457,7 @@ function updateDrops(dt){
   }
   drops=keepDrops;
 }
- 
+
 function equipItem(name,item){
   item._name=name; // store for getWeaponType()
   var prevAtk=0,prevDef=0,prevSpd=0,prevHp=0;
@@ -1215,7 +1508,7 @@ function equipItem(name,item){
   updateHUD();
   updateStatsPanel();
 }
- 
+
 // ── INVENTORY & STATS PANEL ───────────────────────────────
 function openPanel(tab){
   panelOpen=true; gameRunning=false;
@@ -1316,7 +1609,7 @@ function updateStatsPanel(){
 function addToInventory(name,item){
   inventory.push({name:name,item:item});
 }
- 
+
 function updateGearHUD(slot,name,item){  var el=document.getElementById('gear-'+slot);
   var rc=RARITY_COLORS[item.rarity];
   el.style.borderColor=rc;
@@ -1324,7 +1617,7 @@ function updateGearHUD(slot,name,item){  var el=document.getElementById('gear-'+
   el.querySelector('.gear-name').textContent=name.length>10?name.substring(0,9)+'…':name;
   el.querySelector('span').style.filter='drop-shadow(0 0 4px '+rc+')';
 }
- 
+
 function playPickup(rarity){
   if(!AC)return; var now=AC.currentTime;
   var freq=rarity==='legendary'?880:(rarity==='epic'?660:(rarity==='rare'?528:440));
@@ -1336,7 +1629,7 @@ function playPickup(rarity){
     o.connect(g); g.connect(sfxGain); o.start(t); o.stop(t+0.28);
   })(i,freqs[i]);}
 }
- 
+
 // ── VISUAL EQUIP — rebuild weapon mesh on swordArm ────────
 function rebuildWeapon(name,item){
   var sa=player.swordArm;
@@ -1344,7 +1637,7 @@ function rebuildWeapon(name,item){
   var toRemove=[];
   sa.traverse(function(c){if(c.userData.isWeaponMesh)toRemove.push(c);});
   for(var i=0;i<toRemove.length;i++)sa.remove(toRemove[i]);
- 
+
   var wc=item.color;
   if(name.indexOf('Sword')>=0||name.indexOf('Dagger')>=0){
     var len=name.indexOf('Dagger')>=0?0.7:1.05;
@@ -1377,7 +1670,7 @@ function rebuildWeapon(name,item){
     limb.rotation.z=Math.PI/2; limb.position.y=-0.88; limb.userData.isWeaponMesh=true; sa.add(limb);
   }
 }
- 
+
 // ── VISUAL EQUIP — rebuild armor (chest + arms) ───────────
 function rebuildArmor(name,item){
   var ac=item.color;
@@ -1393,10 +1686,10 @@ function rebuildArmor(name,item){
   var toRemove2=[];
   playerGroup.traverse(function(c){if(c.userData.isArmorOverlay)toRemove2.push(c);});
   for(var i=0;i<toRemove2.length;i++)playerGroup.remove(toRemove2[i]);
- 
+
   var acMat=lmat(ac);
   var goldMat=lmat(item.rarity==='common'?0x887744:(item.rarity==='legendary'?0xffdd00:0xffcc00));
- 
+
   if(item.armorType==='leather'){
     // Leather straps overlay
     for(var i=0;i<2;i++){
@@ -1427,7 +1720,7 @@ function rebuildArmor(name,item){
       dfl2.position.set(0,1.5,-0.3); dfl2.userData.isArmorOverlay=true; playerGroup.add(dfl2);
     }
   }
- 
+
   // Recolor the main torso pieces
   var torsoColors=['steelM'];
   playerGroup.traverse(function(c){
@@ -1436,7 +1729,7 @@ function rebuildArmor(name,item){
     }
   });
 }
- 
+
 function hurtPlayer(amount){
   if(isDodging){floatText(playerGroup.position,'DODGE!','#00ffee');return;}
   var dmg=isBlocking?Math.max(1,amount-stats.def-10):Math.max(1,amount-stats.def);
@@ -1447,7 +1740,7 @@ function hurtPlayer(amount){
   if(stats.hp<=0){stats.hp=0;endGame();}
   updateHUD();
 }
- 
+
 // Special: Fire Nova with cooldown display
 function doSpecial(){
   if(spcCd>0)return;
@@ -1465,13 +1758,13 @@ function doSpecial(){
   floatText(playerGroup.position,'🔥 FIRE NOVA!','#ff6600');
   document.getElementById('bSpc').classList.add('cooldown');
 }
- 
+
 function doDodge(){
   if(isDodging||dodgeTimer>0)return;
   isDodging=true; dodgeTimer=1.2;
   player.velocity.add(player.direction.clone().negate().multiplyScalar(9));
 }
- 
+
 // ── FX ────────────────────────────────────────────────────
 function spawnFX(pos,color,count){
   for(var i=0;i<count;i++){
@@ -1488,7 +1781,7 @@ function floatText(wpos,text,color){
   el.style.left=(x-30+(Math.random()-.5)*44)+'px'; el.style.top=(y-22)+'px'; el.textContent=text;
   document.body.appendChild(el); setTimeout(function(){if(el.parentNode)el.parentNode.removeChild(el);},1200);
 }
- 
+
 // ── HUD ───────────────────────────────────────────────────
 function updateHUD(){
   var hp=Math.max(0,Math.ceil(stats.hp));
@@ -1506,7 +1799,7 @@ function updateHUD(){
   document.getElementById('shield-ind').classList.toggle('active',isBlocking);
   document.getElementById('bBlk').classList.toggle('blocking',isBlocking);
 }
- 
+
 // ── INPUT ─────────────────────────────────────────────────
 function setupInput(){
   document.addEventListener('keydown',function(e){
@@ -1523,7 +1816,7 @@ function setupInput(){
     keys[e.code]=false;
     if(e.code==='KeyE')isBlocking=false;
   });
- 
+
   var jzone=document.getElementById('jzone'),jthumb=document.getElementById('jthumb');
   var jActive=false,jId=-1,jsx=0,jsy=0;
   jzone.addEventListener('touchstart',function(e){e.preventDefault();var t=e.changedTouches[0];jActive=true;jId=t.identifier;jsx=t.clientX;jsy=t.clientY;},{passive:false});
@@ -1554,13 +1847,13 @@ function setupInput(){
       if(t.clientX>window.innerWidth/2&&!t.target.closest('#abtns')){isCamTouch=true;camTouchId=t.identifier;lastTX=t.clientX;lastTY=t.clientY;}
     }
   });
- 
+
   var mdown=false,lmx=0,lmy=0;
   document.addEventListener('mousedown',function(e){mdown=true;lmx=e.clientX;lmy=e.clientY;if(e.button===0&&gameRunning)playerAttack();});
   document.addEventListener('mousemove',function(e){if(!mdown)return;camAngle-=(e.clientX-lmx)*.004;camPitch=Math.max(.2,Math.min(1.2,camPitch+(e.clientY-lmy)*.003));lmx=e.clientX;lmy=e.clientY;});
   document.addEventListener('mouseup',function(){mdown=false;});
   document.addEventListener('contextmenu',function(e){e.preventDefault();});
- 
+
   document.getElementById('bAtk').addEventListener('touchstart',function(e){e.preventDefault();playerAttack();},{passive:false});
   document.getElementById('bAtk').addEventListener('click',playerAttack);
   document.getElementById('bDdg').addEventListener('touchstart',function(e){e.preventDefault();doDodge();},{passive:false});
@@ -1585,13 +1878,14 @@ function animate(){
     updateWaveLogic(dt);
     updateClouds(dt);
     tickMelody(dt);
+    updateMinimap();
     updateHUD();
   }
   updateCamera();
   updateSlashCanvas(dt);
   renderer.render(scene,camera);
 }
- 
+
 function updateSlashCanvas(dt){
   slashCtx.clearRect(0,0,slashW,slashH);
   var keep=[];
@@ -1608,7 +1902,7 @@ function updateSlashCanvas(dt){
   }
   slashTrails=keep;
 }
- 
+
 function updatePlayer(dt){
   var mx=0,mz=0;
   if(keys['KeyW']||keys['ArrowUp'])mz=-1;
@@ -1616,18 +1910,18 @@ function updatePlayer(dt){
   if(keys['KeyA']||keys['ArrowLeft'])mx=-1;
   if(keys['KeyD']||keys['ArrowRight'])mx=1;
   mx+=joystick.x; mz+=joystick.y;
- 
+
   var fwd=new THREE.Vector3(-Math.sin(camAngle),0,-Math.cos(camAngle));
   var rgt=new THREE.Vector3(Math.cos(camAngle),0,-Math.sin(camAngle));
   var mv=new THREE.Vector3().addScaledVector(fwd,-mz).addScaledVector(rgt,mx);
   var len=mv.length(); if(len>1)mv.divideScalar(len);
   if(len>.05){player.direction.lerp(mv.clone().normalize(),.18);player.direction.normalize();}
- 
+
   var spd=isDodging?stats.spd*4:stats.spd*(isBlocking?.4:1);
   player.velocity.lerp(mv.clone().multiplyScalar(spd),.18);
   playerGroup.position.add(player.velocity); playerGroup.position.y=0;
-  if(playerGroup.position.length()>47)playerGroup.position.normalize().multiplyScalar(47);
- 
+  if(playerGroup.position.length()>90)playerGroup.position.normalize().multiplyScalar(90);
+
   // ── Circle collider push-out ──
   var px=playerGroup.position.x, pz=playerGroup.position.z;
   for(var ci2=0;ci2<colliders.length;ci2++){
@@ -1645,13 +1939,39 @@ function updatePlayer(dt){
       px=playerGroup.position.x; pz=playerGroup.position.z;
     }
   }
- 
-  if(player.direction.length()>.01){
+
+  // ── River collision — push player back from water ──
+  var px2=playerGroup.position.x, pz2=playerGroup.position.z;
+  for(var ri=0;ri<riverSegments.length;ri++){
+    var seg=riverSegments[ri];
+    if(seg.BRIDGE){
+      // skip bridge zone
+      continue;
+    }
+    // Point-to-segment distance
+    var sx=seg.x2-seg.x1, sz=seg.z2-seg.z1;
+    var segLen2=sx*sx+sz*sz;
+    if(segLen2<0.001)continue;
+    var t=Math.max(0,Math.min(1,((px2-seg.x1)*sx+(pz2-seg.z1)*sz)/segLen2));
+    var closestX=seg.x1+t*sx, closestZ=seg.z1+t*sz;
+    var rdx=px2-closestX, rdz=pz2-closestZ;
+    var rdist=Math.sqrt(rdx*rdx+rdz*rdz);
+    var riverHalf=seg.w+0.8; // player can't enter water
+    // Allow crossing the bridge (x near 0, z near 0)
+    var nearBridge=(Math.abs(closestX)<7&&Math.abs(closestZ)<8);
+    if(!nearBridge&&rdist<riverHalf&&rdist>0.001){
+      var push=(riverHalf-rdist)/rdist;
+      playerGroup.position.x+=rdx*push;
+      playerGroup.position.z+=rdz*push;
+      player.velocity.x*=0.1; player.velocity.z*=0.1;
+      px2=playerGroup.position.x; pz2=playerGroup.position.z;
+    }
+  }
     var ta=Math.atan2(player.direction.x,player.direction.z),diff=ta-playerGroup.rotation.y;
     while(diff>Math.PI)diff-=Math.PI*2; while(diff<-Math.PI)diff+=Math.PI*2;
     playerGroup.rotation.y+=diff*.16;
   }
- 
+
   // Walk anim + footsteps
   var moving=player.velocity.length()>.001;
   player.walkAnim+=moving?dt*8:0;
@@ -1660,25 +1980,66 @@ function updatePlayer(dt){
     var c=playerGroup.children[ci];
     if(c.userData.isLeg)c.rotation.x=moving?Math.sin(player.walkAnim+(c.position.x<0?0:Math.PI))*.46:c.rotation.x*.85;
   }
- 
-  // ── Sword: 3-phase slash ──
+
+  // ── Weapon: 5-phase physics-based animation ──
   if(player.isAttacking){
     player.slashTimer+=dt;
     var t3=player.slashTimer, sa=player.swordArm;
-    if(t3<0.14){
-      var p=t3/0.14;
-      sa.rotation.x=p*1.4; sa.rotation.z=-p*0.7; sa.rotation.y=-p*0.9;
-    }else if(t3<0.36){
-      var p=(t3-0.14)/0.22, e2=1-Math.pow(1-p,2);
-      sa.rotation.x=1.4-e2*3.8; sa.rotation.z=-0.7+e2*1.0; sa.rotation.y=-0.9+e2*1.4;
-    }else if(t3<0.55){
-      var p=(t3-0.36)/0.19;
-      sa.rotation.x=(1.4-3.8)*(1-p); sa.rotation.z=(0.3)*(1-p); sa.rotation.y=(0.5)*(1-p);
-    }else{
-      sa.rotation.set(0,0,0); player.isAttacking=false;
+    var wtype=getWeaponType();
+    if(wtype==='spear'){
+      // Spear thrust: pull back → lunge forward → recover
+      if(t3<0.10){var p=t3/0.10; sa.rotation.x=-p*0.6; sa.rotation.z=p*0.1;}
+      else if(t3<0.28){var p=(t3-0.10)/0.18,e2=1-Math.pow(1-p,2); sa.rotation.x=-0.6+e2*1.8; sa.rotation.z=0.1-e2*0.15;}
+      else if(t3<0.50){var p=(t3-0.28)/0.22; sa.rotation.x=1.2*(1-p); sa.rotation.z=-0.05*(1-p);}
+      else{sa.rotation.set(0,0,0); player.isAttacking=false;}
+    } else {
+      // Sword: 5-phase — coil → windup → powerslash → follow-through → recover
+      if(t3<0.08){
+        // Phase 1: raise and coil back (weight of sword felt)
+        var p=t3/0.08, ease=p*p;
+        sa.rotation.x=-ease*0.5; sa.rotation.z=ease*0.4; sa.rotation.y=ease*0.6;
+      } else if(t3<0.18){
+        // Phase 2: full windup (sword goes high behind shoulder)
+        var p=(t3-0.08)/0.10, ease=1-Math.pow(1-p,2);
+        sa.rotation.x=-0.5+ease*(-0.9); sa.rotation.z=0.4+ease*(-1.1); sa.rotation.y=0.6+ease*(0.5);
+      } else if(t3<0.32){
+        // Phase 3: explosive slash (fastest phase)
+        var p=(t3-0.18)/0.14, ease=1-Math.pow(1-p,3);
+        sa.rotation.x=-1.4+ease*3.8; sa.rotation.z=-0.7+ease*1.6; sa.rotation.y=1.1-ease*2.0;
+      } else if(t3<0.48){
+        // Phase 4: follow-through (sword continues, arm extends)
+        var p=(t3-0.32)/0.16, ease=p*p;
+        sa.rotation.x=2.4-ease*1.8; sa.rotation.z=0.9-ease*0.7; sa.rotation.y=-0.9+ease*0.8;
+      } else if(t3<0.65){
+        // Phase 5: smooth recovery back to rest
+        var p=(t3-0.48)/0.17, ease=1-Math.pow(1-p,2);
+        sa.rotation.x=(2.4-1.8)*(1-ease); sa.rotation.z=(0.2)*(1-ease); sa.rotation.y=(-0.1)*(1-ease);
+      } else {
+        sa.rotation.set(0,0,0); player.isAttacking=false;
+      }
     }
   }
- 
+
+  // ── Idle weapon sway — natural arm bob when standing/walking ──
+  if(!player.isAttacking){
+    var sa=player.swordArm;
+    var wtype=getWeaponType();
+    var moving=player.velocity.length()>.001;
+    var swayAmt=moving?0.06:0.02;
+    var swayFreq=moving?player.walkAnim*0.5:performance.now()*0.0008;
+    if(wtype==='bow'||wtype==='crossbow'){
+      // Bow held diagonally, slight natural raise
+      sa.rotation.x+=((-0.3)-sa.rotation.x)*dt*4;
+      sa.rotation.z+=((0.15)-sa.rotation.z)*dt*4;
+    } else if(wtype==='spear'){
+      sa.rotation.x+=((0.1+Math.sin(swayFreq)*swayAmt*0.5)-sa.rotation.x)*dt*5;
+      sa.rotation.z+=((0.05)-sa.rotation.z)*dt*5;
+    } else {
+      sa.rotation.x+=(Math.sin(swayFreq)*swayAmt-sa.rotation.x)*dt*6;
+      sa.rotation.z+=(Math.cos(swayFreq*0.7)*swayAmt*0.5-sa.rotation.z)*dt*6;
+    }
+  }
+
   // ── Shield arm animation ──
   var sha=player.shieldArm;
   if(isBlocking){
@@ -1690,13 +2051,13 @@ function updatePlayer(dt){
     sha.rotation.x=sha.rotation.x*(1-dt*8);
     sha.rotation.z=sha.rotation.z*(1-dt*8);
   }
- 
+
   if(dodgeTimer>0){dodgeTimer-=dt;if(dodgeTimer<.9)isDodging=false;}
   if(atkCd>0)atkCd-=dt;
   if(spcCd>0)spcCd-=dt;
   if(stats.hp<stats.maxHp)stats.hp=Math.min(stats.maxHp,stats.hp+dt*.9);
 }
- 
+
 function updateEnemies(dt){
   var t=performance.now()*.001;
   enemies.forEach(function(e){
@@ -1707,19 +2068,50 @@ function updateEnemies(dt){
     if(dist>2.2)e.group.position.addScaledVector(dir,e.spd);
     e.group.rotation.y=Math.atan2(dir.x,dir.z);
     e.walkAnim+=dt*6;
- 
-    // Wind-up: enemy crouches 0.55s before striking
-    var isWindup=(e.atkTimer>0&&e.atkTimer<0.55&&dist<3.5&&!e.ranged);
- 
+
+    // Enhanced enemy combat animation
+    var isWindup=(e.atkTimer>0&&e.atkTimer<0.6&&dist<3.8&&!e.ranged);
+    var isStriking=(e.strikeFlash>0.12);
+
     for(var ci=0;ci<e.group.children.length;ci++){
       var c=e.group.children[ci];
       if(c.userData.isLeg){
-        var tgt=isWindup?0.6:Math.sin(e.walkAnim+(c.position.x<0?0:Math.PI))*.42;
-        c.rotation.x+=(tgt-c.rotation.x)*Math.min(1,dt*9);
+        var tgt=isWindup?0.55:Math.sin(e.walkAnim+(c.position.x<0?0:Math.PI))*.44;
+        // Smooth spring-like leg movement
+        c.rotation.x+=(tgt-c.rotation.x)*Math.min(1,dt*10);
       }
-      if(c.userData.isWing){e.wingAnim+=dt*4;c.rotation.z=c.userData.side*(.3+Math.sin(e.wingAnim)*.7);}
+      if(c.userData.isArm){
+        // Arm swing during walk, raise during windup, slam during strike
+        var side=c.userData.side||1;
+        if(isWindup){
+          // Raise weapon arm back before strike
+          var windupT=1-(e.atkTimer/0.6);
+          var tgtX=-windupT*1.2*side;
+          var tgtZ=windupT*0.8;
+          c.rotation.x+=(tgtX-c.rotation.x)*Math.min(1,dt*12);
+          c.rotation.z+=(tgtZ-c.rotation.z)*Math.min(1,dt*12);
+        } else if(isStriking){
+          // Slam forward on strike
+          c.rotation.x+=(1.5*side-c.rotation.x)*Math.min(1,dt*18);
+          c.rotation.z+=(-0.5-c.rotation.z)*Math.min(1,dt*18);
+        } else {
+          // Normal arm swing — opposite to legs
+          var tgtX=Math.sin(e.walkAnim+(c.userData.side>0?Math.PI:0))*0.38;
+          c.rotation.x+=(tgtX-c.rotation.x)*Math.min(1,dt*8);
+          c.rotation.z+=(0-c.rotation.z)*Math.min(1,dt*6);
+        }
+      }
+      if(c.userData.isWing){e.wingAnim+=dt*4;c.rotation.z=c.userData.side*(.3+Math.sin(e.wingAnim)*.75);}
     }
- 
+
+    // Body lean toward target during windup
+    if(isWindup){
+      var leanT=1-(e.atkTimer/0.6);
+      e.group.rotation.x+=(leanT*0.18-e.group.rotation.x)*dt*8;
+    } else {
+      e.group.rotation.x+=(0-e.group.rotation.x)*dt*6;
+    }
+
     // Attack timer
     if(dist<2.5){
       e.atkTimer-=dt;
@@ -1733,7 +2125,7 @@ function updateEnemies(dt){
     } else {
       if(e.atkTimer<0) e.atkTimer=0.6+Math.random();
     }
- 
+
     // Hit flash (white-red on damage taken)
     if(e.hitFlash>0){
       e.hitFlash-=dt;
@@ -1745,7 +2137,7 @@ function updateEnemies(dt){
     } else {
       e.group.traverse(function(c){if(c.isMesh&&c.material&&c.material.emissive)c.material.emissive.setHex(0);});
     }
- 
+
     if(e.ranged&&dist<20){
       e.shootTimer-=dt;
       if(e.shootTimer<=0){
@@ -1768,7 +2160,7 @@ function updateEnemies(dt){
     }
   });
 }
- 
+
 function updateProjectiles(dt){
   var keep=[];
   projectiles.forEach(function(p){
@@ -1788,15 +2180,108 @@ function updateWaveLogic(dt){
   if(wavePaused){waveTimer-=dt;if(waveTimer<=0){wavePaused=false;startWave(waveNum);}return;}
   if(enemies.length===0&&waveCount>0){waveNum++;waveCount=0;wavePaused=true;waveTimer=4;floatText(playerGroup.position,'WAVE CLEARED!','#f5c842');stats.hp=Math.min(stats.maxHp,stats.hp+30);}
 }
+function updateMinimap(){
+  if(!minimapCtx||!gameRunning)return;
+  var ctx=minimapCtx;
+  var S=130; // canvas size
+  var WORLD=200; // world units shown (±100)
+  var scale=S/WORLD;
+  // player is always at center of minimap
+  var px=playerGroup.position.x, pz=playerGroup.position.z;
+
+  ctx.clearRect(0,0,S,S);
+  // Background
+  ctx.fillStyle='#0d1a0d';
+  ctx.beginPath(); ctx.arc(S/2,S/2,S/2,0,Math.PI*2); ctx.fill();
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(S/2,S/2,S/2,0,Math.PI*2); ctx.clip();
+
+  // Ground base
+  ctx.fillStyle='#1a3a10';
+  ctx.fillRect(0,0,S,S);
+
+  // River — draw as thick blue line
+  ctx.strokeStyle='#2255cc';
+  ctx.lineWidth=6;
+  ctx.beginPath();
+  var riverPtsM=[
+    {x:-4,z:-92},{x:-5,z:-70},{x:-3,z:-50},{x:2,z:-30},{x:5,z:-10},
+    {x:4,z:10},{x:2,z:30},{x:-2,z:50},{x:-4,z:70},{x:-3,z:92}
+  ];
+  for(var i=0;i<riverPtsM.length;i++){
+    var wx=riverPtsM[i].x-px, wz=riverPtsM[i].z-pz;
+    var sx2=S/2+wx*scale, sz2=S/2+wz*scale;
+    if(i===0)ctx.moveTo(sx2,sz2); else ctx.lineTo(sx2,sz2);
+  }
+  ctx.stroke();
+
+  // Bridge marker
+  ctx.strokeStyle='#aa8833'; ctx.lineWidth=4;
+  ctx.beginPath();
+  ctx.moveTo(S/2+(-5-px)*scale,S/2+(0-pz)*scale);
+  ctx.lineTo(S/2+(5-px)*scale,S/2+(0-pz)*scale);
+  ctx.stroke();
+
+  // Buildings — brown squares
+  ctx.fillStyle='#8a5020';
+  var houseDefs=[
+    {x:22,z:18},{x:28,z:22},{x:24,z:28},
+    {x:-25,z:15},{x:-30,z:22},
+    {x:20,z:-25},{x:26,z:-32},
+    {x:-22,z:-28},{x:-28,z:-22},
+    {x:55,z:40},{x:60,z:46},
+    {x:-55,z:35},{x:-60,z:42}
+  ];
+  for(var i=0;i<houseDefs.length;i++){
+    var hx=houseDefs[i].x, hz=houseDefs[i].z;
+    var mx2=S/2+(hx-px)*scale, mz2=S/2+(hz-pz)*scale;
+    ctx.fillRect(mx2-3,mz2-3,6,6);
+  }
+
+  // Fortress marker
+  ctx.fillStyle='#aa9966';
+  var fx=S/2+(0-px)*scale, fz=S/2+(-35-pz)*scale;
+  ctx.fillRect(fx-5,fz-5,10,10);
+
+  // Enemies — red dots
+  ctx.fillStyle='#ff3322';
+  for(var ei=0;ei<enemies.length;ei++){
+    var e=enemies[ei]; if(e.isDead)continue;
+    var ex=S/2+(e.group.position.x-px)*scale;
+    var ez=S/2+(e.group.position.z-pz)*scale;
+    ctx.beginPath(); ctx.arc(ex,ez,2.5,0,Math.PI*2); ctx.fill();
+  }
+
+  // Player — white triangle pointing forward
+  ctx.save();
+  ctx.translate(S/2,S/2);
+  ctx.rotate(playerGroup.rotation.y);
+  ctx.fillStyle='#ffffff';
+  ctx.beginPath(); ctx.moveTo(0,-6); ctx.lineTo(4,5); ctx.lineTo(-4,5); ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  ctx.restore();
+
+  // Compass ring ticks
+  ctx.strokeStyle='#f5c84244'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(S/2,S/2,S/2-1,0,Math.PI*2); ctx.stroke();
+  ctx.fillStyle='#f5c84299'; ctx.font='7px Cinzel,serif';
+  ctx.textAlign='center';
+  ctx.fillText('N',S/2,10);
+  ctx.fillText('S',S/2,S-3);
+  ctx.fillText('W',6,S/2+3);
+  ctx.fillText('E',S-4,S/2+3);
+}
 function updateClouds(dt){var t=performance.now()*.001;cloudObjs.forEach(function(c){c.position.x=c.userData.ox+((t*c.userData.spd*2)%200)-100;});}
-function updateCamera(){
+
   var tx=playerGroup.position.x+Math.sin(camAngle)*camDist*Math.cos(camPitch);
   var ty=playerGroup.position.y+camDist*Math.sin(camPitch)+1;
   var tz=playerGroup.position.z+Math.cos(camAngle)*camDist*Math.cos(camPitch);
   camera.position.lerp(new THREE.Vector3(tx,ty,tz),.1);
   camera.lookAt(playerGroup.position.x,playerGroup.position.y+1.5,playerGroup.position.z);
 }
- 
+
 function startGame(){
   document.getElementById('title-screen').style.display='none';
   initAudio();
@@ -1830,7 +2315,7 @@ function respawnGame(){
   document.getElementById('death-screen').style.display='none';
   gameRunning=true; updateHUD(); setTimeout(function(){startWave(1);},500);
 }
- 
+
 init();
 </script>
 </body>
