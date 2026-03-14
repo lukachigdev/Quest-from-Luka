@@ -101,6 +101,10 @@ body{background:#1a6fbb;font-family:'Cinzel',serif;overflow:hidden;width:100vw;h
 .inv-empty{color:#5a4a3a;font-size:10px;text-align:center;padding:28px;letter-spacing:2px}
 #panel-close{width:100%;padding:10px;text-align:center;font-family:'Cinzel',serif;font-size:10px;letter-spacing:3px;color:#9a7a4a;cursor:pointer;border:none;background:none;border-top:1px solid #7a4a0a33;display:block}
 #panel-close:hover{color:#f5c842}
+/* ── Minimap ── */
+#minimap{position:absolute;bottom:168px;left:16px;width:130px;height:130px;border-radius:50%;border:2px solid #7a4a0a99;background:#0d1a0d;overflow:hidden;pointer-events:none;box-shadow:0 0 12px #000a,0 0 4px #f5c84233}
+#minimap canvas{width:130px;height:130px;border-radius:50%}
+#minimap-label{position:absolute;bottom:162px;left:82px;color:#f5c84266;font-size:7px;letter-spacing:1px;pointer-events:none}
 </style>
 </head>
 <body>
@@ -125,6 +129,8 @@ body{background:#1a6fbb;font-family:'Cinzel',serif;overflow:hidden;width:100vw;h
     <div class="bar-outer spc-bg"><div id="spc-fill"></div></div>
   </div>
   <div id="shield-ind">🛡 BLOCKING</div>
+  <div id="minimap"><canvas id="minimapCanvas" width="130" height="130"></canvas></div>
+  <div id="minimap-label">MAP</div>
   <div id="gear">
     <div class="gear-slot" id="gear-weapon"><span>⚔</span><div class="gear-name">NONE</div></div>
     <div class="gear-slot" id="gear-armor"><span>🛡</span><div class="gear-name">NONE</div></div>
@@ -664,8 +670,8 @@ function setupLights(){
   sun.position.set(30,65,20); sun.castShadow=true;
   sun.shadow.mapSize.width=sun.shadow.mapSize.height=4096;
   sun.shadow.camera.near=0.5; sun.shadow.camera.far=200;
-  sun.shadow.camera.left=-80; sun.shadow.camera.right=80;
-  sun.shadow.camera.top=80; sun.shadow.camera.bottom=-80;
+  sun.shadow.camera.left=-120; sun.shadow.camera.right=120;
+  sun.shadow.camera.top=120; sun.shadow.camera.bottom=-120;
   sun.shadow.bias=-0.0003;
   sun.shadow.normalBias=0.02;
   scene.add(sun);
@@ -681,66 +687,219 @@ function setupLights(){
   rim.position.set(0,10,-30); scene.add(rim);
 }
 
+// River segments: array of {x1,z1,x2,z2,w} line segments for collision
+var riverSegments=[];
+// Building colliders stored in main colliders array with r
+// Minimap canvas
+var minimapCtx=null, MINIMAP_SCALE=130/200; // 200 = map half display radius
+
 function buildGround(){
   colliders=[];
-  // Simple large flat green ground — no vertex displacement (was causing blue void)
+  riverSegments=[];
+
+  // ── Big flat ground — 400x400 ──
   var ground=new THREE.Mesh(
-    new THREE.PlaneGeometry(200,200,1,1),
+    new THREE.PlaneGeometry(400,400,1,1),
     new THREE.MeshLambertMaterial({map:grassTex})
   );
   ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
 
-  // Colour variety patches on top
+  // Colour variety patches
   var patchCols=[0x1a7a10,0x228800,0x2a9918,0x3aaa22,0x156010];
-  for(var i=0;i<80;i++){
-    var a=Math.random()*Math.PI*2, r=3+Math.random()*52;
-    var p=new THREE.Mesh(
-      new THREE.CircleGeometry(0.5+Math.random()*2.5,7),
-      lmat(patchCols[i%patchCols.length])
-    );
-    p.rotation.x=-Math.PI/2; p.position.set(Math.cos(a)*r,0.01,Math.sin(a)*r);
-    scene.add(p);
-  }
-  // Dirt path patches
-  for(var i=0;i<20;i++){
-    var a=Math.random()*Math.PI*2, r=4+Math.random()*30;
-    var dp=new THREE.Mesh(new THREE.CircleGeometry(0.5+Math.random()*1.2,8),lmat(0x9a7744));
-    dp.rotation.x=-Math.PI/2; dp.position.set(Math.cos(a)*r,0.012,Math.sin(a)*r);
-    scene.add(dp);
+  for(var i=0;i<180;i++){
+    var a=Math.random()*Math.PI*2, r=4+Math.random()*88;
+    var p=new THREE.Mesh(new THREE.CircleGeometry(0.6+Math.random()*3.5,7),lmat(patchCols[i%patchCols.length]));
+    p.rotation.x=-Math.PI/2; p.position.set(Math.cos(a)*r,0.01,Math.sin(a)*r); scene.add(p);
   }
 
   // Rocks with colliders
-  for(var i=0;i<32;i++){
-    var a=Math.random()*Math.PI*2, r=12+Math.random()*38;
-    var rx=Math.cos(a)*r, rz=Math.sin(a)*r, rs=0.4+Math.random()*0.9;
+  for(var i=0;i<55;i++){
+    var a=Math.random()*Math.PI*2, r=15+Math.random()*72;
+    var rx=Math.cos(a)*r, rz=Math.sin(a)*r, rs=0.4+Math.random()*1.0;
     var rock=addM(scene,new THREE.DodecahedronGeometry(rs,0),lmat(0x887766),rx,rs*0.4,rz);
     rock.rotation.set(Math.random()*3,Math.random()*3,Math.random()*3);
     addM(scene,new THREE.SphereGeometry(rs*0.5,5,4),lmat(0x447730),rx,rs*0.82,rz).scale.y=0.18;
     colliders.push({x:rx,z:rz,r:rs+0.45});
   }
 
-  // Trees with colliders
-  for(var i=0;i<50;i++){
-    var a=Math.random()*Math.PI*2, r=15+Math.random()*38;
+  // Trees — more and spread further
+  for(var i=0;i<110;i++){
+    var a=Math.random()*Math.PI*2, r=18+Math.random()*72;
+    // avoid river zone (x: -5..5, z: -90..90)
     var tx=Math.cos(a)*r, tz=Math.sin(a)*r;
+    if(Math.abs(tx)<8&&Math.abs(tz)<92)tx+=tx>0?9:-9;
     buildTree(tx,0,tz);
     colliders.push({x:tx,z:tz,r:1.2});
   }
 
   // Decorative bushes
   var bushCols=[0xdd3322,0xffaa00,0xee5599,0xffd700,0xff6688];
-  for(var i=0;i<22;i++){
-    var a=Math.random()*Math.PI*2, r=8+Math.random()*44;
+  for(var i=0;i<50;i++){
+    var a=Math.random()*Math.PI*2, r=10+Math.random()*80;
     var bx=Math.cos(a)*r, bz=Math.sin(a)*r;
     var bush=new THREE.Group();
     for(var j=0;j<4+Math.floor(Math.random()*3);j++){
       var bc=bushCols[Math.floor(Math.random()*bushCols.length)];
-      addM(bush,new THREE.SphereGeometry(0.18+Math.random()*0.22,6,5),lmat(bc),
-        (Math.random()-0.5)*0.7, Math.random()*0.4, (Math.random()-0.5)*0.7);
+      addM(bush,new THREE.SphereGeometry(0.18+Math.random()*0.22,6,5),lmat(bc),(Math.random()-0.5)*0.7,Math.random()*0.4,(Math.random()-0.5)*0.7);
     }
     addM(bush,new THREE.CylinderGeometry(0.06,0.1,0.45,5),lmat(0x5c3311),0,0.18,0);
     bush.position.set(bx,0,bz); scene.add(bush);
   }
+
+  // ── RIVER ── runs roughly north-south with a slight curve
+  buildRiver();
+
+  // ── MEDIEVAL BUILDINGS ──
+  buildVillage();
+
+  // Setup minimap
+  minimapCtx=document.getElementById('minimapCanvas').getContext('2d');
+}
+
+function buildRiver(){
+  // River path: series of points running north-south, slightly curved
+  var riverPts=[
+    {x:-4,z:-92},{x:-5,z:-70},{x:-3,z:-50},{x:2,z:-30},{x:5,z:-10},
+    {x:4,z:10},{x:2,z:30},{x:-2,z:50},{x:-4,z:70},{x:-3,z:92}
+  ];
+  var riverW=7; // river half-width
+  var waterMat=new THREE.MeshLambertMaterial({color:0x2255aa,transparent:true,opacity:0.82});
+  var bankMat=lmat(0x8a7340);
+
+  for(var i=0;i<riverPts.length-1;i++){
+    var p0=riverPts[i], p1=riverPts[i+1];
+    var dx=p1.x-p0.x, dz=p1.z-p0.z;
+    var len=Math.sqrt(dx*dx+dz*dz);
+    var mx=(p0.x+p1.x)/2, mz=(p0.z+p1.z)/2;
+    var ang=Math.atan2(dx,dz);
+
+    // Water surface
+    var water=new THREE.Mesh(new THREE.PlaneGeometry(riverW*2,len+1,1,1),waterMat);
+    water.rotation.x=-Math.PI/2; water.position.set(mx,-0.04,mz);
+    water.rotation.z=-ang; scene.add(water);
+
+    // Muddy banks
+    var bankL=new THREE.Mesh(new THREE.PlaneGeometry(2,len+1,1,1),bankMat);
+    bankL.rotation.x=-Math.PI/2; bankL.position.set(mx+Math.cos(ang+Math.PI/2)*(riverW+1),0.01,mz+Math.sin(ang+Math.PI/2)*(riverW+1));
+    bankL.rotation.z=-ang; scene.add(bankL);
+    var bankR=new THREE.Mesh(new THREE.PlaneGeometry(2,len+1,1,1),bankMat);
+    bankR.rotation.x=-Math.PI/2; bankR.position.set(mx-Math.cos(ang+Math.PI/2)*(riverW+1),0.01,mz-Math.sin(ang+Math.PI/2)*(riverW+1));
+    bankR.rotation.z=-ang; scene.add(bankR);
+
+    // Register as river segment for collision
+    riverSegments.push({x1:p0.x,z1:p0.z,x2:p1.x,z2:p1.z,w:riverW});
+  }
+
+  // ── BRIDGE at z=0 crossing point ──
+  var bMat=lmat(0x8a6030);
+  var stoneMat=lmat(0x998877);
+  // Bridge deck — 4 wide, 14 long spanning the river
+  var deck=new THREE.Mesh(new THREE.BoxGeometry(14,0.5,4.5),bMat);
+  deck.position.set(0,0.22,0); scene.add(deck); deck.receiveShadow=true; deck.castShadow=true;
+  // Bridge planks
+  for(var bi=-5;bi<=5;bi++){
+    var plank=addM(scene,new THREE.BoxGeometry(1.0,0.15,4.2),lmat(0x7a5020),bi*1.15,0.5,0);
+  }
+  // Stone arch supports
+  for(var si=-1;si<=1;si+=2){
+    var arch=addM(scene,new THREE.CylinderGeometry(0.6,0.8,2.2,8),stoneMat,si*5,0,0);
+    addM(scene,new THREE.BoxGeometry(2,0.4,5),stoneMat,si*5,1.3,0);
+  }
+  // Bridge railings
+  for(var ri=0;ri<2;ri++){
+    var rz=ri===0?2:-2;
+    for(var rp=-5;rp<=5;rp++){
+      addM(scene,new THREE.CylinderGeometry(0.08,0.08,0.9,5),stoneMat,rp*1.2,0.9,rz);
+    }
+    addM(scene,new THREE.BoxGeometry(13,0.12,0.12),stoneMat,0,1.35,rz);
+  }
+
+  // Bridge is a crossing — add gap in river collision at z=0 area
+  riverSegments.push({BRIDGE:true,x:0,z:0,w:8,len:8}); // marker for bridge, not a blocker
+}
+
+function buildVillage(){
+  // Place 8 medieval houses in clusters around the map
+  var houseDefs=[
+    {x:22,z:18,rot:0.3},{x:28,z:22,rot:-0.2},{x:24,z:28,rot:0.8},
+    {x:-25,z:15,rot:1.1},{x:-30,z:22,rot:0.5},
+    {x:20,z:-25,rot:-0.5},{x:26,z:-32,rot:0.4},
+    {x:-22,z:-28,rot:2.1},{x:-28,z:-22,rot:1.8},
+    {x:55,z:40,rot:0.2},{x:60,z:46,rot:-0.3},
+    {x:-55,z:35,rot:1.3},{x:-60,z:42,rot:0.9}
+  ];
+  for(var i=0;i<houseDefs.length;i++){
+    var h=houseDefs[i];
+    buildMedievalHouse(h.x,h.z,h.rot);
+    colliders.push({x:h.x,z:h.z,r:4.5});
+  }
+  // Well in village center
+  buildWell(25,24);
+  buildWell(-27,18);
+}
+
+function buildMedievalHouse(x,z,rot){
+  var g=new THREE.Group();
+  var wallMat=lmat(0xc8a878); // sandstone walls
+  var darkWallMat=lmat(0xa08055);
+  var roofMat=lmat(0x882222); // red-brown roof
+  var beamMat=lmat(0x5c3311); // dark wood beams
+  var chimMat=lmat(0x776655); // chimney stone
+  var ww=5,wh=3,wd=4; // width, height, depth
+
+  // Main walls
+  addM(g,new THREE.BoxGeometry(ww,wh,wd),wallMat,0,wh/2,0);
+  // Half-timber beams overlay
+  for(var bi=0;bi<3;bi++){
+    var bx=((bi/(2))-0.5)*(ww-0.5);
+    var vb=addM(g,new THREE.BoxGeometry(0.15,wh,0.05),beamMat,bx,wh/2,wd/2+0.01);
+  }
+  // Horizontal beams
+  for(var bj=0;bj<2;bj++){
+    addM(g,new THREE.BoxGeometry(ww+0.2,0.15,0.05),beamMat,0,0.8+bj*1.1,wd/2+0.01);
+  }
+  // Roof — pitched gable
+  var roofH=2.2;
+  var roof=addM(g,new THREE.CylinderGeometry(0.01,Math.sqrt(ww*ww/4+roofH*roofH)*0.72,roofH,4),roofMat,0,wh+roofH/2,0);
+  roof.rotation.y=Math.PI/4;
+  // Roof overhang trim
+  addM(g,new THREE.BoxGeometry(ww+0.4,0.12,wd+0.4),beamMat,0,wh+0.06,0);
+  // Chimney
+  addM(g,new THREE.BoxGeometry(0.7,1.8,0.7),chimMat,ww/2-0.6,wh+roofH*0.6,0);
+  addM(g,new THREE.BoxGeometry(0.9,0.2,0.9),chimMat,ww/2-0.6,wh+roofH*0.6+0.9,0);
+  // Door
+  addM(g,new THREE.BoxGeometry(0.8,1.6,0.08),lmat(0x3a1e05),0,0.8,wd/2+0.02);
+  // Windows
+  for(var wi=-1;wi<=1;wi+=2){
+    addM(g,new THREE.BoxGeometry(0.7,0.7,0.08),lmat(0x99ccdd),wi*1.4,1.6,wd/2+0.02);
+    // Window frame
+    addM(g,new THREE.BoxGeometry(0.75,0.08,0.06),beamMat,wi*1.4,1.25,wd/2+0.03);
+    addM(g,new THREE.BoxGeometry(0.75,0.08,0.06),beamMat,wi*1.4,1.95,wd/2+0.03);
+  }
+  // Foundation stones
+  addM(g,new THREE.BoxGeometry(ww+0.3,0.3,wd+0.3),lmat(0x888070),0,0.15,0);
+
+  g.position.set(x,0,z); g.rotation.y=rot; scene.add(g);
+}
+
+function buildWell(x,z){
+  var g=new THREE.Group();
+  var stoneMat=lmat(0x998877);
+  // Well base ring
+  var base=addM(g,new THREE.CylinderGeometry(0.9,1.0,0.8,12),stoneMat,0,0.4,0);
+  // Well rim
+  addM(g,new THREE.TorusGeometry(0.95,0.12,6,12),stoneMat,0,0.82,0);
+  // Posts
+  for(var pi=0;pi<2;pi++){
+    var px=pi===0?-0.8:0.8;
+    addM(g,new THREE.CylinderGeometry(0.07,0.07,1.4,6),lmat(0x5c3311),px,1.5,0);
+  }
+  // Roof beam
+  addM(g,new THREE.BoxGeometry(2.0,0.15,0.15),lmat(0x5c3311),0,2.2,0);
+  // Bucket
+  addM(g,new THREE.CylinderGeometry(0.12,0.10,0.22,8),lmat(0x7a5020),0,1.4,0);
+  colliders.push({x:x,z:z,r:1.2});
+  g.position.set(x,0,z); scene.add(g);
 }
 
 function buildTree(x,y,z){
@@ -902,13 +1061,13 @@ function buildPlayer(){
 // ── ENEMIES ───────────────────────────────────────────────
 function spawnEnemy(type,x,z){
   var g=new THREE.Group(),hp,spd,atk,reward,size,ranged=false,flying=false;
-  if(type==='skeleton'){hp=30+waveNum*8;spd=.026+waveNum*.002;atk=8;reward=10;size=1.0;}
-  else if(type==='soldier'){hp=55+waveNum*10;spd=.020+waveNum*.002;atk=14;reward=18;size=1.05;}
-  else if(type==='orc'){hp=80+waveNum*15;spd=.016+waveNum*.002;atk=20;reward=28;size=1.3;}
-  else if(type==='vampire'){hp=60+waveNum*12;spd=.030+waveNum*.003;atk=16;reward=30;size=1.0;ranged=true;}
-  else if(type==='miniboss'){hp=200+waveNum*25;spd=.018+waveNum*.002;atk=26;reward=80;size=1.5;}
-  else if(type==='dragon'){hp=180+waveNum*30;spd=.022+waveNum*.002;atk=22;reward=100;size=1.4;ranged=true;flying=true;}
-  else{hp=500+waveNum*60;spd=.013;atk=35;reward=250;size=2.0;}
+  if(type==='skeleton'){hp=30+waveNum*8;spd=.026+waveNum*.002;atk=16;reward=10;size=1.0;}
+  else if(type==='soldier'){hp=55+waveNum*10;spd=.020+waveNum*.002;atk=28;reward=18;size=1.05;}
+  else if(type==='orc'){hp=80+waveNum*15;spd=.016+waveNum*.002;atk=40;reward=28;size=1.3;}
+  else if(type==='vampire'){hp=60+waveNum*12;spd=.030+waveNum*.003;atk=32;reward=30;size=1.0;ranged=true;}
+  else if(type==='miniboss'){hp=200+waveNum*25;spd=.018+waveNum*.002;atk=52;reward=80;size=1.5;}
+  else if(type==='dragon'){hp=180+waveNum*30;spd=.022+waveNum*.002;atk=44;reward=100;size=1.4;ranged=true;flying=true;}
+  else{hp=500+waveNum*60;spd=.013;atk=70;reward=250;size=2.0;}
   if(type==='skeleton')buildSkeleton(g,size);
   else if(type==='soldier')buildSoldier(g,size);
   else if(type==='orc')buildOrc(g,size);
@@ -1061,7 +1220,7 @@ function startWave(w){
   else if(w<=9)types=['orc','vampire','miniboss','dragon'];
   else types=['miniboss','dragon','vampire'];
   var count=4+w*2;
-  for(var i=0;i<count;i++){(function(idx){setTimeout(function(){if(!gameRunning)return;var a=(idx/count)*Math.PI*2+Math.random()*.5,r=20+Math.random()*12;spawnEnemy(types[Math.floor(Math.random()*types.length)],Math.cos(a)*r,Math.sin(a)*r);},idx*320);})(i);}
+  for(var i=0;i<count;i++){(function(idx){setTimeout(function(){if(!gameRunning)return;var a=(idx/count)*Math.PI*2+Math.random()*.5,r=28+Math.random()*20;spawnEnemy(types[Math.floor(Math.random()*types.length)],Math.cos(a)*r,Math.sin(a)*r);},idx*320);})(i);}
   if(w%5===0)setTimeout(function(){if(gameRunning)spawnEnemy('boss',0,16);},count*320+600);
   if(w%3===0&&w%5!==0)setTimeout(function(){if(gameRunning)spawnEnemy('miniboss',12,8);},count*320+400);
   if(w>=4&&w%4===0)setTimeout(function(){if(gameRunning)spawnEnemy('dragon',-14,10);},count*320+300);
@@ -1720,6 +1879,7 @@ function animate(){
     updateWaveLogic(dt);
     updateClouds(dt);
     tickMelody(dt);
+    updateMinimap();
     updateHUD();
   }
   updateCamera();
@@ -1761,7 +1921,7 @@ function updatePlayer(dt){
   var spd=isDodging?stats.spd*4:stats.spd*(isBlocking?.4:1);
   player.velocity.lerp(mv.clone().multiplyScalar(spd),.18);
   playerGroup.position.add(player.velocity); playerGroup.position.y=0;
-  if(playerGroup.position.length()>47)playerGroup.position.normalize().multiplyScalar(47);
+  if(playerGroup.position.length()>90)playerGroup.position.normalize().multiplyScalar(90);
 
   // ── Circle collider push-out ──
   var px=playerGroup.position.x, pz=playerGroup.position.z;
@@ -1781,6 +1941,33 @@ function updatePlayer(dt){
     }
   }
 
+  // ── River collision — push player back from water ──
+  var px2=playerGroup.position.x, pz2=playerGroup.position.z;
+  for(var ri=0;ri<riverSegments.length;ri++){
+    var seg=riverSegments[ri];
+    if(seg.BRIDGE){
+      // skip bridge zone
+      continue;
+    }
+    // Point-to-segment distance
+    var sx=seg.x2-seg.x1, sz=seg.z2-seg.z1;
+    var segLen2=sx*sx+sz*sz;
+    if(segLen2<0.001)continue;
+    var t=Math.max(0,Math.min(1,((px2-seg.x1)*sx+(pz2-seg.z1)*sz)/segLen2));
+    var closestX=seg.x1+t*sx, closestZ=seg.z1+t*sz;
+    var rdx=px2-closestX, rdz=pz2-closestZ;
+    var rdist=Math.sqrt(rdx*rdx+rdz*rdz);
+    var riverHalf=seg.w+0.8; // player can't enter water
+    // Allow crossing the bridge (x near 0, z near 0)
+    var nearBridge=(Math.abs(closestX)<7&&Math.abs(closestZ)<8);
+    if(!nearBridge&&rdist<riverHalf&&rdist>0.001){
+      var push=(riverHalf-rdist)/rdist;
+      playerGroup.position.x+=rdx*push;
+      playerGroup.position.z+=rdz*push;
+      player.velocity.x*=0.1; player.velocity.z*=0.1;
+      px2=playerGroup.position.x; pz2=playerGroup.position.z;
+    }
+  }
   if(player.direction.length()>.01){
     var ta=Math.atan2(player.direction.x,player.direction.z),diff=ta-playerGroup.rotation.y;
     while(diff>Math.PI)diff-=Math.PI*2; while(diff<-Math.PI)diff+=Math.PI*2;
@@ -1995,7 +2182,101 @@ function updateWaveLogic(dt){
   if(wavePaused){waveTimer-=dt;if(waveTimer<=0){wavePaused=false;startWave(waveNum);}return;}
   if(enemies.length===0&&waveCount>0){waveNum++;waveCount=0;wavePaused=true;waveTimer=4;floatText(playerGroup.position,'WAVE CLEARED!','#f5c842');stats.hp=Math.min(stats.maxHp,stats.hp+30);}
 }
+function updateMinimap(){
+  if(!minimapCtx||!gameRunning)return;
+  var ctx=minimapCtx;
+  var S=130; // canvas size
+  var WORLD=200; // world units shown (±100)
+  var scale=S/WORLD;
+  // player is always at center of minimap
+  var px=playerGroup.position.x, pz=playerGroup.position.z;
+
+  ctx.clearRect(0,0,S,S);
+  // Background
+  ctx.fillStyle='#0d1a0d';
+  ctx.beginPath(); ctx.arc(S/2,S/2,S/2,0,Math.PI*2); ctx.fill();
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(S/2,S/2,S/2,0,Math.PI*2); ctx.clip();
+
+  // Ground base
+  ctx.fillStyle='#1a3a10';
+  ctx.fillRect(0,0,S,S);
+
+  // River — draw as thick blue line
+  ctx.strokeStyle='#2255cc';
+  ctx.lineWidth=6;
+  ctx.beginPath();
+  var riverPtsM=[
+    {x:-4,z:-92},{x:-5,z:-70},{x:-3,z:-50},{x:2,z:-30},{x:5,z:-10},
+    {x:4,z:10},{x:2,z:30},{x:-2,z:50},{x:-4,z:70},{x:-3,z:92}
+  ];
+  for(var i=0;i<riverPtsM.length;i++){
+    var wx=riverPtsM[i].x-px, wz=riverPtsM[i].z-pz;
+    var sx2=S/2+wx*scale, sz2=S/2+wz*scale;
+    if(i===0)ctx.moveTo(sx2,sz2); else ctx.lineTo(sx2,sz2);
+  }
+  ctx.stroke();
+
+  // Bridge marker
+  ctx.strokeStyle='#aa8833'; ctx.lineWidth=4;
+  ctx.beginPath();
+  ctx.moveTo(S/2+(-5-px)*scale,S/2+(0-pz)*scale);
+  ctx.lineTo(S/2+(5-px)*scale,S/2+(0-pz)*scale);
+  ctx.stroke();
+
+  // Buildings — brown squares
+  ctx.fillStyle='#8a5020';
+  var houseDefs=[
+    {x:22,z:18},{x:28,z:22},{x:24,z:28},
+    {x:-25,z:15},{x:-30,z:22},
+    {x:20,z:-25},{x:26,z:-32},
+    {x:-22,z:-28},{x:-28,z:-22},
+    {x:55,z:40},{x:60,z:46},
+    {x:-55,z:35},{x:-60,z:42}
+  ];
+  for(var i=0;i<houseDefs.length;i++){
+    var hx=houseDefs[i].x, hz=houseDefs[i].z;
+    var mx2=S/2+(hx-px)*scale, mz2=S/2+(hz-pz)*scale;
+    ctx.fillRect(mx2-3,mz2-3,6,6);
+  }
+
+  // Fortress marker
+  ctx.fillStyle='#aa9966';
+  var fx=S/2+(0-px)*scale, fz=S/2+(-35-pz)*scale;
+  ctx.fillRect(fx-5,fz-5,10,10);
+
+  // Enemies — red dots
+  ctx.fillStyle='#ff3322';
+  for(var ei=0;ei<enemies.length;ei++){
+    var e=enemies[ei]; if(e.isDead)continue;
+    var ex=S/2+(e.group.position.x-px)*scale;
+    var ez=S/2+(e.group.position.z-pz)*scale;
+    ctx.beginPath(); ctx.arc(ex,ez,2.5,0,Math.PI*2); ctx.fill();
+  }
+
+  // Player — white triangle pointing forward
+  ctx.save();
+  ctx.translate(S/2,S/2);
+  ctx.rotate(playerGroup.rotation.y);
+  ctx.fillStyle='#ffffff';
+  ctx.beginPath(); ctx.moveTo(0,-6); ctx.lineTo(4,5); ctx.lineTo(-4,5); ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  ctx.restore();
+
+  // Compass ring ticks
+  ctx.strokeStyle='#f5c84244'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(S/2,S/2,S/2-1,0,Math.PI*2); ctx.stroke();
+  ctx.fillStyle='#f5c84299'; ctx.font='7px Cinzel,serif';
+  ctx.textAlign='center';
+  ctx.fillText('N',S/2,10);
+  ctx.fillText('S',S/2,S-3);
+  ctx.fillText('W',6,S/2+3);
+  ctx.fillText('E',S-4,S/2+3);
+}
 function updateClouds(dt){var t=performance.now()*.001;cloudObjs.forEach(function(c){c.position.x=c.userData.ox+((t*c.userData.spd*2)%200)-100;});}
+
 function updateCamera(){
   var tx=playerGroup.position.x+Math.sin(camAngle)*camDist*Math.cos(camPitch);
   var ty=playerGroup.position.y+camDist*Math.sin(camPitch)+1;
